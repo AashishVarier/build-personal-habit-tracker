@@ -160,9 +160,7 @@ The release APK built in CI is unsigned (`app-release-unsigned`), because no sig
 
   WorkManager adds `WAKE_LOCK`, `FOREGROUND_SERVICE` and `ACCESS_NETWORK_STATE`. The last one only lets the app ask whether a network is available; without `INTERNET`, the app can't send or receive anything.
 
-## Contributors
 
-- [@AashishVarier](https://github.com/AashishVarier)
 
 ## License
 
