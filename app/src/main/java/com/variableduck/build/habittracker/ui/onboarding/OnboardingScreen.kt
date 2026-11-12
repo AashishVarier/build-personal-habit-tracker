@@ -1,7 +1,6 @@
 package com.variableduck.build.habittracker.ui.onboarding
 
 import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
@@ -43,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.variableduck.build.habittracker.backup.BackupManager
@@ -52,6 +49,7 @@ import com.variableduck.build.habittracker.ui.common.HabitForm
 import com.variableduck.build.habittracker.ui.common.RestorePreviewDialog
 import com.variableduck.build.habittracker.ui.common.SectionTitle
 import com.variableduck.build.habittracker.ui.common.TimePickerDialog
+import com.variableduck.build.habittracker.ui.common.notificationsAllowed
 import com.variableduck.build.habittracker.ui.common.rememberFormatter
 
 private const val STEP_COUNT = 3
@@ -61,6 +59,19 @@ fun OnboardingScreen(onFinished: () -> Unit, viewModel: OnboardingViewModel = hi
     val state by viewModel.state.collectAsStateWithLifecycle()
     val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::previewRestore)
+    }
+    val context = LocalContext.current
+    // Ask for notification permission at the end of onboarding so the daily reminder can appear.
+    // Finish either way: the Today screen keeps offering to turn notifications on.
+    val finishLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        viewModel.finish(onFinished)
+    }
+    val startTracking = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationsAllowed(context)) {
+            finishLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.finish(onFinished)
+        }
     }
 
     Column(
@@ -105,7 +116,7 @@ fun OnboardingScreen(onFinished: () -> Unit, viewModel: OnboardingViewModel = hi
                 Button(onClick = viewModel::next, modifier = Modifier.height(48.dp)) { Text("Next") }
             } else {
                 Button(
-                    onClick = { viewModel.finish(onFinished) },
+                    onClick = startTracking,
                     enabled = !state.saving,
                     modifier = Modifier.height(48.dp),
                 ) { Text("Start tracking") }
@@ -133,16 +144,17 @@ private fun HabitsStep(state: OnboardingUiState, viewModel: OnboardingViewModel,
     TextButton(onClick = onRestore) { Text("Restore from a backup instead") }
 
     SectionTitle("Suggestions")
-    viewModel.suggestions.chunked(2).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            row.forEach { suggestion ->
-                AssistChip(
-                    onClick = { viewModel.addHabit(suggestion.form) },
-                    label = { Text(suggestion.label) },
-                    enabled = state.canAddHabit,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+    viewModel.suggestions.forEach { suggestion ->
+        OutlinedButton(
+            onClick = { viewModel.addHabit(suggestion.form) },
+            enabled = state.canAddHabit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Text(suggestion.label, modifier = Modifier.padding(start = 8.dp))
+            Spacer(Modifier.weight(1f))
         }
     }
 
@@ -171,25 +183,14 @@ private fun HabitsStep(state: OnboardingUiState, viewModel: OnboardingViewModel,
 @Composable
 private fun ScheduleStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     val formatter = rememberFormatter()
-    val context = LocalContext.current
     var pickDate by rememberSaveable { mutableStateOf(false) }
     var pickTime by rememberSaveable { mutableStateOf(false) }
-    var notificationsGranted by rememberSaveable {
-        mutableStateOf(
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED,
-        )
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        notificationsGranted = it
-    }
 
     Text("Cycles and reminders", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
     SectionTitle("14-day cycle start")
     Text(
-        "Targets are reviewed at the end of every 14 days. Past days start as NO; " +
-            "fill them in later with History import if you like.",
+        "Targets are reviewed at the end of every 14 days. Habits are tracked from today, so if " +
+            "you pick an earlier date, that first, shorter cycle doesn't change any targets.",
         style = MaterialTheme.typography.bodyMedium,
     )
     FilledTonalButton(onClick = { pickDate = true }, modifier = Modifier.height(48.dp)) {
@@ -200,14 +201,9 @@ private fun ScheduleStep(state: OnboardingUiState, viewModel: OnboardingViewMode
     FilledTonalButton(onClick = { pickTime = true }, modifier = Modifier.height(48.dp)) {
         Text(formatter.clock(state.reminderMinute))
     }
-    if (!notificationsGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        OutlinedButton(
-            onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-            modifier = Modifier.height(48.dp),
-        ) { Text("Allow notifications") }
-    }
     Text(
-        "For an on-time reminder, allow \"Alarms & reminders\" in Settings later if Android asks.",
+        "When you start, Android asks whether the app may send notifications. Allow it, or the " +
+            "reminder can't appear.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

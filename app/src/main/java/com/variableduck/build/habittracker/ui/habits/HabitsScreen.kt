@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
@@ -38,7 +39,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.variableduck.build.habittracker.data.repo.HabitDraft
 import com.variableduck.build.habittracker.domain.Graduation
+import com.variableduck.build.habittracker.domain.HabitDeletion
 import com.variableduck.build.habittracker.model.Habit
+import com.variableduck.build.habittracker.ui.common.Formatter
 import com.variableduck.build.habittracker.ui.common.HabitForm
 import com.variableduck.build.habittracker.ui.common.HabitFormState
 import com.variableduck.build.habittracker.ui.common.ScreenHeader
@@ -49,6 +52,7 @@ private sealed interface HabitDialog {
     data object Add : HabitDialog
     data class Edit(val habit: Habit, val inEditWindow: Boolean) : HabitDialog
     data class Replace(val habit: Habit) : HabitDialog
+    data class Delete(val item: ActiveHabitUi) : HabitDialog
 }
 
 @Composable
@@ -69,8 +73,9 @@ fun HabitsScreen(viewModel: HabitsViewModel = hiltViewModel()) {
             ActiveHabitCard(
                 item = item,
                 onMandatory = { viewModel.setMandatory(item.habit.id, it) },
-                onEdit = { dialog = HabitDialog.Edit(item.habit, item.editDaysLeft > 0) },
+                onEdit = { dialog = HabitDialog.Edit(item.habit, item.inGracePeriod) },
                 onReplace = { dialog = HabitDialog.Replace(item.habit) },
+                onDelete = { dialog = HabitDialog.Delete(item) },
             )
         }
         if (!state.loading && state.canAdd) {
@@ -83,7 +88,7 @@ fun HabitsScreen(viewModel: HabitsViewModel = hiltViewModel()) {
         SectionTitle("Archived habits")
         if (state.archived.isEmpty()) {
             Text(
-                "Habits you replace after graduating are kept here with their history.",
+                "Habits you replace or delete at the end of a cycle are kept here with their history.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -93,7 +98,7 @@ fun HabitsScreen(viewModel: HabitsViewModel = hiltViewModel()) {
                 Text(habit.name, style = MaterialTheme.typography.titleSmall)
                 Text(
                     "${formatter.date(habit.createdOn)} – ${habit.archivedOn?.let(formatter::date).orEmpty()} · " +
-                        "final target: ${formatter.target(habit.type, habit.currentTarget)}",
+                        "final target: ${formatter.targetInline(habit.type, habit.currentTarget)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -127,6 +132,26 @@ fun HabitsScreen(viewModel: HabitsViewModel = hiltViewModel()) {
             onDismiss = { dialog = null },
             onSave = { viewModel.replace(current.habit.id, it) { dialog = null } },
         )
+        is HabitDialog.Delete -> {
+            val habit = current.item.habit
+            AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("Delete ${habit.name}?") },
+                text = {
+                    Text(
+                        if (current.item.deletion == HabitDeletion.DELETE_COMPLETELY) {
+                            "It was added recently, so it is removed completely, together with its entries."
+                        } else {
+                            "It moves to Archived habits with its history kept, and its slot becomes free."
+                        },
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.delete(habit.id) { dialog = null } }) { Text("Delete") }
+                },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
+            )
+        }
     }
 
     state.message?.let { message ->
@@ -144,6 +169,7 @@ private fun ActiveHabitCard(
     onMandatory: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onReplace: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val formatter = rememberFormatter()
     val habit = item.habit
@@ -154,7 +180,7 @@ private fun ActiveHabitCard(
             if (habit.type.hasTarget) {
                 Text(
                     "${formatter.step(habit.type, habit.step)} · started at " +
-                        formatter.target(habit.type, habit.startingTarget),
+                        formatter.targetInline(habit.type, habit.startingTarget),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -178,13 +204,12 @@ private fun ActiveHabitCard(
                         Icon(Icons.Filled.Edit, contentDescription = null)
                         Text("Edit")
                     }
-                } else {
-                    Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Locked until graduation",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                }
+                if (item.deletion != HabitDeletion.NOT_ALLOWED) {
+                    OutlinedButton(onClick = onDelete, modifier = Modifier.height(48.dp)) {
+                        Icon(Icons.Filled.Delete, contentDescription = null)
+                        Text("Delete")
+                    }
                 }
                 if (item.graduation.graduated) {
                     FilledTonalButton(onClick = onReplace, modifier = Modifier.height(48.dp)) {
@@ -193,15 +218,38 @@ private fun ActiveHabitCard(
                     }
                 }
             }
-            if (item.editDaysLeft > 0) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!item.inGracePeriod) {
+                    Icon(
+                        Icons.Filled.Lock,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                }
                 Text(
-                    "Free edits for ${item.editDaysLeft} more day${if (item.editDaysLeft == 1) "" else "s"}.",
+                    lockMessage(item, formatter),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
+}
+
+/** Explains when the habit can be edited or deleted. */
+private fun lockMessage(item: ActiveHabitUi, formatter: Formatter): String {
+    if (item.inGracePeriod) {
+        return "You can edit or delete this habit until the end of ${formatter.date(item.lastFreeEditDay)}. " +
+            "After that it is locked in."
+    }
+    val edits = if (item.graduation.graduated) "Graduated, so it can be edited again." else "Edits unlock when it graduates."
+    val delete = when {
+        item.deletion == HabitDeletion.ARCHIVE -> "The cycle is ending: you can delete it today."
+        item.nextDeletionDay != null -> "You can delete it when this cycle ends (${formatter.date(item.nextDeletionDay)})."
+        else -> "You can delete it when the current cycle ends."
+    }
+    return "Locked in. $edits $delete"
 }
 
 @Composable

@@ -5,8 +5,10 @@ package com.variableduck.build.habittracker.ui.today
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,13 +61,17 @@ import com.variableduck.build.habittracker.model.HabitType
 import com.variableduck.build.habittracker.ui.common.Formatter
 import com.variableduck.build.habittracker.ui.common.TimePickerDialog
 import com.variableduck.build.habittracker.ui.common.rememberFormatter
+import com.variableduck.build.habittracker.ui.common.rememberNotificationAccess
 import com.variableduck.build.habittracker.ui.theme.LocalStatusColors
 
 @Composable
 fun TodayScreen(onOpenReview: () -> Unit, viewModel: TodayViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val notificationAccess = rememberNotificationAccess()
     TodayContent(
         state = state,
+        notificationsAllowed = notificationAccess.allowed,
+        onEnableNotifications = notificationAccess.request,
         onSelect = viewModel::select,
         onToggle = viewModel::toggle,
         onActualTime = viewModel::setActualTime,
@@ -77,6 +83,8 @@ fun TodayScreen(onOpenReview: () -> Unit, viewModel: TodayViewModel = hiltViewMo
 @Composable
 fun TodayContent(
     state: TodayUiState,
+    notificationsAllowed: Boolean,
+    onEnableNotifications: () -> Unit,
     onSelect: (DaySelection) -> Unit,
     onToggle: (Long) -> Unit,
     onActualTime: (Long, Int?) -> Unit,
@@ -117,6 +125,23 @@ fun TodayContent(
             }
         }
 
+        if (!notificationsAllowed) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Notifications are off, so the daily reminder can't appear.",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Button(onClick = onEnableNotifications) { Text("Turn on") }
+                }
+            }
+        }
+
         if (state.pendingReview) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
@@ -144,14 +169,22 @@ fun TodayContent(
             )
         } else {
             state.tiles.chunked(2).forEach { pair ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                // Equal-height tiles in each row, whatever their content.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                ) {
                     pair.forEach { tile ->
                         HabitTile(
                             tile = tile,
                             formatter = formatter,
                             onToggle = { onToggle(tile.entry.habit.id) },
                             onActualTime = { onActualTime(tile.entry.habit.id, it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                         )
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
@@ -222,12 +255,19 @@ private fun HabitTile(
                 onToggle()
             },
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                // Always two lines tall, so the lines below start at the same height in every tile.
                 Text(
                     habit.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    minLines = 2,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -236,12 +276,18 @@ private fun HabitTile(
                     Icon(Icons.Filled.Star, contentDescription = "Mandatory", modifier = Modifier.padding(start = 4.dp))
                 }
             }
-            Text(formatter.target(habit.type, habit.currentTarget), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                formatter.target(habit.type, habit.currentTarget),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 if (done) "YES" else "NO",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
+            Spacer(Modifier.weight(1f))
             if (habit.type == HabitType.DEADLINE) {
                 val actual = tile.entry.actualTime
                 val label = when {

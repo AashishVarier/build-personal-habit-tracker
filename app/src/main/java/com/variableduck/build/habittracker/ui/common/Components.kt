@@ -5,6 +5,7 @@ package com.variableduck.build.habittracker.ui.common
 import android.text.format.DateFormat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,6 +53,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.variableduck.build.habittracker.data.repo.HabitDraft
 import com.variableduck.build.habittracker.data.repo.TrackerRepository
@@ -95,7 +97,7 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** − value + with large touch targets. */
+/** Label on its own line, then − value + with large touch targets, so nothing gets cut off. */
 @Composable
 fun NumberStepper(
     label: String,
@@ -107,26 +109,28 @@ fun NumberStepper(
     display: (Int) -> String = { it.toString() },
     enabled: Boolean = true,
 ) {
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        OutlinedButton(
-            onClick = { onChange((value - step).coerceIn(range)) },
-            enabled = enabled && value - step >= range.first,
-            modifier = Modifier.size(48.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        ) { Text("−", style = MaterialTheme.typography.titleLarge) }
-        Text(
-            display(value),
-            modifier = Modifier.width(96.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        OutlinedButton(
-            onClick = { onChange((value + step).coerceIn(range)) },
-            enabled = enabled && value + step <= range.last,
-            modifier = Modifier.size(48.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        ) { Text("+", style = MaterialTheme.typography.titleLarge) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                onClick = { onChange((value - step).coerceIn(range)) },
+                enabled = enabled && value - step >= range.first,
+                modifier = Modifier.size(48.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) { Text("−", style = MaterialTheme.typography.titleLarge) }
+            Text(
+                display(value),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            OutlinedButton(
+                onClick = { onChange((value + step).coerceIn(range)) },
+                enabled = enabled && value + step <= range.last,
+                modifier = Modifier.size(48.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) { Text("+", style = MaterialTheme.typography.titleLarge) }
+        }
     }
 }
 
@@ -265,17 +269,23 @@ fun HabitForm(
             modifier = Modifier.fillMaxWidth(),
         )
         if (typeEditable) {
-            val types = listOf(HabitType.DURATION to "Minutes", HabitType.DEADLINE to "By a time", HabitType.BOOLEAN to "Yes / no")
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                types.forEachIndexed { index, (type, label) ->
+                HABIT_TYPES.forEachIndexed { index, type ->
                     SegmentedButton(
                         selected = state.type == type,
                         onClick = { onChange(state.copy(type = type)) },
-                        shape = SegmentedButtonDefaults.itemShape(index, types.size),
-                    ) { Text(label, maxLines = 1) }
+                        shape = SegmentedButtonDefaults.itemShape(index, HABIT_TYPES.size),
+                        // No check mark: it would leave too little room for the label.
+                        icon = {},
+                    ) { Text(typeLabel(type), maxLines = 1) }
                 }
             }
         }
+        Text(
+            typeDescription(state.type),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         when (state.type) {
             HabitType.DURATION -> {
                 NumberStepper(
@@ -297,7 +307,7 @@ fun HabitForm(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Text("Target time", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                     FilledTonalButton(onClick = { pickTime = true }, modifier = Modifier.height(48.dp)) {
-                        Text("by ${formatter.clock(state.deadlineTarget)}")
+                        Text(formatter.clock(state.deadlineTarget))
                     }
                 }
                 NumberStepper(
@@ -309,11 +319,7 @@ fun HabitForm(
                     display = { "$it min earlier" },
                 )
             }
-            HabitType.BOOLEAN -> Text(
-                "Done or not done. No target, so no level-ups.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            HabitType.BOOLEAN -> Unit
         }
         if (showMandatory) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -340,6 +346,21 @@ fun HabitForm(
             },
         )
     }
+}
+
+private val HABIT_TYPES = listOf(HabitType.DURATION, HabitType.DEADLINE, HabitType.BOOLEAN)
+
+/** Short, consistently capitalised names for the habit types. */
+fun typeLabel(type: HabitType): String = when (type) {
+    HabitType.DURATION -> "Duration"
+    HabitType.DEADLINE -> "Deadline"
+    HabitType.BOOLEAN -> "Yes / No"
+}
+
+private fun typeDescription(type: HabitType): String = when (type) {
+    HabitType.DURATION -> "Do it for a number of minutes. Levelling up adds minutes."
+    HabitType.DEADLINE -> "Do it by a time of day. Levelling up moves the time earlier."
+    HabitType.BOOLEAN -> "Done or not done. No target, so no level-ups."
 }
 
 /** A plain text field that only accepts digits (kept for numeric settings). */

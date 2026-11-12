@@ -42,6 +42,7 @@ import com.variableduck.build.habittracker.ui.common.ScreenHeader
 import com.variableduck.build.habittracker.ui.common.SectionTitle
 import com.variableduck.build.habittracker.ui.common.TimePickerDialog
 import com.variableduck.build.habittracker.ui.common.rememberFormatter
+import com.variableduck.build.habittracker.ui.common.rememberNotificationAccess
 
 @Composable
 fun SettingsScreen(
@@ -54,6 +55,7 @@ fun SettingsScreen(
     val message by viewModel.messages.collectAsStateWithLifecycle()
     val formatter = rememberFormatter()
     val context = LocalContext.current
+    val notificationAccess = rememberNotificationAccess()
     val s = state.settings
 
     var pickTime by rememberSaveable { mutableStateOf(false) }
@@ -95,6 +97,14 @@ fun SettingsScreen(
 
         SectionTitle("Reminder")
         SettingRow("Daily reminder", formatter.clock(s.reminderMinuteOfDay)) { pickTime = true }
+        SettingRow(
+            "Notifications",
+            if (notificationAccess.allowed) "On" else "Off: the reminder can't appear. Tap to turn on.",
+            notificationAccess.request,
+        )
+        SettingRow("Send a test reminder", "Shows the daily reminder now.") {
+            if (notificationAccess.allowed) viewModel.testReminder() else notificationAccess.request()
+        }
         if (!state.exactAlarmsAllowed) {
             SettingRow(
                 "Allow exact reminders",

@@ -6,8 +6,11 @@ import com.variableduck.build.habittracker.core.TimeProvider
 import com.variableduck.build.habittracker.data.repo.HabitDraft
 import com.variableduck.build.habittracker.data.repo.HabitResult
 import com.variableduck.build.habittracker.data.repo.TrackerRepository
+import com.variableduck.build.habittracker.data.settings.SettingsRepository
 import com.variableduck.build.habittracker.domain.EditWindow
 import com.variableduck.build.habittracker.domain.Graduation
+import com.variableduck.build.habittracker.domain.HabitDeletion
+import com.variableduck.build.habittracker.domain.HabitDeletionRule
 import com.variableduck.build.habittracker.model.Habit
 import com.variableduck.build.habittracker.model.isActive
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,7 +30,12 @@ data class ActiveHabitUi(
     val habit: Habit,
     val graduation: Graduation.Progress,
     val canEdit: Boolean,
-    val editDaysLeft: Int,
+    /** True during the habit's first day: everything, including the type, can still change. */
+    val inGracePeriod: Boolean,
+    val lastFreeEditDay: LocalDate,
+    val deletion: HabitDeletion,
+    /** When a locked habit can next be deleted (the end of the current cycle). */
+    val nextDeletionDay: LocalDate?,
 )
 
 data class HabitsUiState(
@@ -44,24 +52,32 @@ data class HabitsUiState(
 @HiltViewModel
 class HabitsViewModel @Inject constructor(
     private val tracker: TrackerRepository,
+    private val settings: SettingsRepository,
     time: TimeProvider,
 ) : ViewModel() {
     private val message = MutableStateFlow<String?>(null)
 
     val state: StateFlow<HabitsUiState> = time.todayFlow()
         .flatMapLatest { today ->
-            combine(tracker.observeAllHabits(), tracker.observeGraduation(today), message) { habits, graduation, msg ->
+            combine(
+                tracker.observeAllHabits(),
+                tracker.observeGraduation(today),
+                settings.settings,
+                message,
+            ) { habits, graduation, appSettings, msg ->
+                val anchor = appSettings.cycleStart
                 HabitsUiState(
                     loading = false,
                     active = habits.filter { it.isActive() }.sortedBy { it.slot }.map { habit ->
                         val progress = graduation[habit.id] ?: Graduation.Progress(0)
-                        val daysLeft = (EditWindow.HABIT_EDIT_DAYS - EditWindow.daysSinceCreated(habit, today))
-                            .coerceAtLeast(0).toInt()
                         ActiveHabitUi(
                             habit = habit,
                             graduation = progress,
                             canEdit = EditWindow.canEditHabitDetails(habit, today, progress.graduated),
-                            editDaysLeft = daysLeft,
+                            inGracePeriod = EditWindow.isInHabitEditWindow(habit, today),
+                            lastFreeEditDay = EditWindow.lastFreeEditDay(habit),
+                            deletion = HabitDeletionRule.mode(habit, today, anchor),
+                            nextDeletionDay = anchor?.let { HabitDeletionRule.nextDeletionDay(it, today) },
                         )
                     },
                     archived = habits.filter { !it.isActive() }.sortedByDescending { it.archivedOn },
@@ -79,6 +95,9 @@ class HabitsViewModel @Inject constructor(
 
     fun replace(habitId: Long, draft: HabitDraft, onSuccess: () -> Unit) =
         run(onSuccess) { tracker.replaceHabit(habitId, draft) }
+
+    fun delete(habitId: Long, onSuccess: () -> Unit) =
+        run(onSuccess) { tracker.deleteHabit(habitId, settings.current().cycleStart) }
 
     fun setMandatory(habitId: Long, mandatory: Boolean) {
         viewModelScope.launch { tracker.setMandatory(habitId, mandatory) }

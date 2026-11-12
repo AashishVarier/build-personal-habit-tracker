@@ -6,6 +6,8 @@ import com.variableduck.build.habittracker.data.db.AppDatabase
 import com.variableduck.build.habittracker.domain.DayFiller
 import com.variableduck.build.habittracker.domain.EditWindow
 import com.variableduck.build.habittracker.domain.Graduation
+import com.variableduck.build.habittracker.domain.HabitDeletion
+import com.variableduck.build.habittracker.domain.HabitDeletionRule
 import com.variableduck.build.habittracker.domain.RewardRule
 import com.variableduck.build.habittracker.domain.RewardStatus
 import com.variableduck.build.habittracker.domain.Targets
@@ -215,7 +217,7 @@ class TrackerRepository @Inject constructor(
             return HabitResult.Error("Locked until this habit graduates.")
         }
         if (!inWindow && draft.type != habit.type) {
-            return HabitResult.Error("The type can only be changed in the first ${EditWindow.HABIT_EDIT_DAYS} days.")
+            return HabitResult.Error("The type can only be changed during the habit's first day.")
         }
         db.withTransaction {
             val newTarget = draft.target
@@ -283,6 +285,34 @@ class TrackerRepository @Inject constructor(
         }
         changeNotifier.notifyChanged()
         return HabitResult.Ok(newId)
+    }
+
+    /**
+     * Deletes an active habit. During its first day it is removed completely (with its entries).
+     * After that it can only be deleted when a cycle ends, and is then archived so its history is
+     * kept. [cycleAnchor] is the cycle start date from the settings.
+     */
+    suspend fun deleteHabit(habitId: Long, cycleAnchor: LocalDate?): HabitResult {
+        val today = time.today()
+        val habit = dao.habit(habitId) ?: return HabitResult.Error("Habit not found.")
+        when (HabitDeletionRule.mode(habit, today, cycleAnchor)) {
+            HabitDeletion.NOT_ALLOWED -> return HabitResult.Error(
+                "This habit is locked. You can delete it when the current cycle ends.",
+            )
+            HabitDeletion.DELETE_COMPLETELY -> db.withTransaction {
+                val affectedDates = dao.logDates(habitId)
+                dao.deleteHabit(habit)
+                (affectedDates + listOf(today.minusDays(1), today)).distinct().forEach { recomputeReward(it) }
+            }
+            HabitDeletion.ARCHIVE -> db.withTransaction {
+                dao.updateHabit(habit.copy(archivedOn = today))
+                dao.deleteLogsFrom(habitId, today)
+                db.cycleDao().supersedePendingPrompts(habitId)
+                recomputeReward(today)
+            }
+        }
+        changeNotifier.notifyChanged()
+        return HabitResult.Ok(habitId)
     }
 
     private suspend fun ensureDay(date: LocalDate, habits: List<Habit>) {

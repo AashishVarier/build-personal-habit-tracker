@@ -151,7 +151,7 @@ private fun ReviewItemRow(ui: ReviewItemUi, formatter: Formatter, onDecide: (Lon
     val name = habit?.name ?: "Removed habit"
     val type = habit?.type
     val change = if (type != null) formatter.change(type, item.oldTarget, item.newTarget) else ""
-    val current = if (type != null) formatter.target(type, item.oldTarget) else ""
+    val current = if (type != null) formatter.targetInline(type, item.oldTarget) else ""
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("$name · ${item.yesCount}/14 YES", style = MaterialTheme.typography.titleSmall)
         when (item.outcome) {

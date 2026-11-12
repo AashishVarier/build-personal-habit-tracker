@@ -115,19 +115,58 @@ class TrackerRepositoryTest {
     }
 
     @Test
-    fun `habits can be edited for 7 days, then are locked until graduation`() = runTest {
+    fun `habits can be edited on their first day, then are locked until graduation`() = runTest {
         createHabits(walk)
         val id = db.trackerDao().activeHabits().single().id
-        time.date = start.plusDays(6)
+        time.date = start.plusDays(1)
         assertTrue(tracker.updateHabitDetails(id, walk.copy(name = "Long walk", target = 20)) is HabitResult.Ok)
         val edited = db.trackerDao().habit(id)!!
         assertEquals("Long walk", edited.name)
         assertEquals(20, edited.currentTarget)
         assertEquals(20, edited.startingTarget)
 
-        time.date = start.plusDays(7)
+        time.date = start.plusDays(2)
         assertTrue(tracker.updateHabitDetails(id, walk.copy(name = "Renamed")) is HabitResult.Error)
         assertEquals("Long walk", db.trackerDao().habit(id)!!.name)
+    }
+
+    @Test
+    fun `a habit deleted on its first day is removed with its entries`() = runTest {
+        createHabits(walk, habitA)
+        val walkId = db.trackerDao().activeHabits().first { it.name == "Walk" }.id
+        val habitAId = db.trackerDao().activeHabits().first { it.name == "Habit A" }.id
+        tracker.setDone(start, habitAId, true)
+        assertFalse(db.trackerDao().day(start)!!.rewardUnlocked) // two habits: both needed
+
+        assertTrue(tracker.deleteHabit(walkId, cycleAnchor = start) is HabitResult.Ok)
+
+        assertNull(db.trackerDao().habit(walkId))
+        assertNull(db.trackerDao().log(start, walkId))
+        // One habit left and it is done, so the recomputed reward unlocks.
+        assertTrue(db.trackerDao().day(start)!!.rewardUnlocked)
+    }
+
+    @Test
+    fun `a locked habit is deleted only when the cycle ends, and its history is kept`() = runTest {
+        createHabits(walk, habitA)
+        val walkId = db.trackerDao().activeHabits().first { it.name == "Walk" }.id
+        time.date = start.plusDays(5)
+        tracker.fillMissingDays()
+        tracker.setDone(time.date.minusDays(1), walkId, true)
+
+        assertTrue(tracker.deleteHabit(walkId, cycleAnchor = start) is HabitResult.Error)
+        assertNull(db.trackerDao().habit(walkId)!!.archivedOn)
+
+        time.date = start.plusDays(13) // last day of the first cycle
+        tracker.fillMissingDays()
+        assertTrue(tracker.deleteHabit(walkId, cycleAnchor = start) is HabitResult.Ok)
+
+        val archived = db.trackerDao().habit(walkId)!!
+        assertEquals(time.date, archived.archivedOn)
+        assertTrue(db.trackerDao().log(start.plusDays(4), walkId)!!.done) // history kept
+        assertEquals(listOf("Habit A"), db.trackerDao().activeHabits().map { it.name })
+        // The freed slot can be used by a new habit.
+        assertTrue(tracker.addHabit(walk.copy(name = "Habit B")) is HabitResult.Ok)
     }
 
     @Test

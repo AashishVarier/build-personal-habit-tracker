@@ -13,6 +13,7 @@ import com.variableduck.build.habittracker.data.repo.CycleRepository
 import com.variableduck.build.habittracker.data.settings.AppSettings
 import com.variableduck.build.habittracker.data.settings.SettingsRepository
 import com.variableduck.build.habittracker.reminders.AlarmScheduler
+import com.variableduck.build.habittracker.reminders.ReminderNotifier
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import javax.inject.Inject
@@ -51,6 +52,7 @@ class SettingsViewModel @Inject constructor(
     private val backups: BackupManager,
     private val folder: BackupFolder,
     private val alarms: AlarmScheduler,
+    private val reminder: ReminderNotifier,
     private val time: TimeProvider,
 ) : ViewModel() {
     private val transient = MutableStateFlow(Transient(exactAlarmsAllowed = alarms.canScheduleExactAlarms()))
@@ -75,6 +77,12 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     fun exactAlarmIntent() = alarms.exactAlarmSettingsIntent()
+
+    /** Shows the daily reminder now, to check that notifications work. */
+    fun testReminder() = perform {
+        reminder.show(test = true)
+        alarms.scheduleAll()
+    }
 
     fun refreshPermissions() {
         transient.update { it.copy(exactAlarmsAllowed = alarms.canScheduleExactAlarms()) }

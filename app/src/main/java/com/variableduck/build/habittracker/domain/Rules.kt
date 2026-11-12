@@ -1,6 +1,7 @@
 package com.variableduck.build.habittracker.domain
 
 import com.variableduck.build.habittracker.model.Habit
+import com.variableduck.build.habittracker.model.isActive
 import com.variableduck.build.habittracker.model.isActiveOn
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -27,8 +28,11 @@ object Graduation {
 }
 
 object EditWindow {
-    /** Name, target and step may be edited freely for this many days after creation. */
-    const val HABIT_EDIT_DAYS = 7
+    /**
+     * A new habit can be edited (and deleted) on the day it was added and for this many days
+     * after, so there are always at least 24 hours to fix a mistake. Then it is locked.
+     */
+    const val NEW_HABIT_GRACE_DAYS = 1
 
     /** Only today and yesterday are editable, unless history-import mode is on. */
     fun canEditEntry(date: LocalDate, today: LocalDate, importMode: Boolean = false): Boolean =
@@ -42,11 +46,52 @@ object EditWindow {
         ChronoUnit.DAYS.between(habit.createdOn, today)
 
     fun isInHabitEditWindow(habit: Habit, today: LocalDate): Boolean =
-        daysSinceCreated(habit, today) < HABIT_EDIT_DAYS
+        daysSinceCreated(habit, today) <= NEW_HABIT_GRACE_DAYS
 
-    /** Locked after 7 days until the habit graduates. */
+    /** The last day on which a new habit can still be edited or deleted freely. */
+    fun lastFreeEditDay(habit: Habit): LocalDate = habit.createdOn.plusDays(NEW_HABIT_GRACE_DAYS.toLong())
+
+    /** Locked after the grace period until the habit graduates. */
     fun canEditHabitDetails(habit: Habit, today: LocalDate, graduated: Boolean): Boolean =
         isInHabitEditWindow(habit, today) || graduated
+}
+
+enum class HabitDeletion {
+    /** Still in its first day: removed together with its entries. */
+    DELETE_COMPLETELY,
+
+    /** Locked habit at a cycle boundary: archived, so its history is kept. */
+    ARCHIVE,
+
+    /** Locked habit in the middle of a cycle. */
+    NOT_ALLOWED,
+}
+
+/**
+ * When an active habit may be deleted: freely during its first day, and after that only when a
+ * cycle ends (on the last day of a cycle or the first day of the next one).
+ */
+object HabitDeletionRule {
+    fun mode(habit: Habit, today: LocalDate, cycleAnchor: LocalDate?): HabitDeletion = when {
+        !habit.isActive() -> HabitDeletion.NOT_ALLOWED
+        EditWindow.isInHabitEditWindow(habit, today) -> HabitDeletion.DELETE_COMPLETELY
+        cycleAnchor != null && isCycleBoundary(cycleAnchor, today) -> HabitDeletion.ARCHIVE
+        else -> HabitDeletion.NOT_ALLOWED
+    }
+
+    fun isCycleBoundary(anchor: LocalDate, today: LocalDate): Boolean {
+        val cycle = CycleCalendar.cycleFor(anchor, today)
+        if (cycle.index < 0) return false
+        val day = CycleCalendar.dayInCycle(anchor, today)
+        return day == CycleCalendar.LENGTH || (day == 1 && cycle.index >= 1)
+    }
+
+    /** The next day on which a locked habit can be deleted: the last day of the current cycle. */
+    fun nextDeletionDay(anchor: LocalDate, today: LocalDate): LocalDate {
+        if (isCycleBoundary(anchor, today)) return today
+        val cycle = CycleCalendar.cycleFor(anchor, today)
+        return if (cycle.index < 0) CycleCalendar.cycleAt(anchor, 0).end else cycle.end
+    }
 }
 
 /** Missed days are recorded as NO: there is no blank state. */

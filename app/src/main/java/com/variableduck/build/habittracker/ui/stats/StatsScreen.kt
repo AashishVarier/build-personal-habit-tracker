@@ -150,7 +150,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                     Text(habit.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     TimelineLine(
                         habit.createdOn,
-                        "Started at ${formatter.target(habit.type, habit.startingTarget)}",
+                        "Started at ${formatter.targetInline(habit.type, habit.startingTarget)}",
                         formatter::date,
                     )
                     stats.changes.forEach { change ->
@@ -166,7 +166,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                         )
                     }
                     Text(
-                        "Now: ${formatter.target(habit.type, habit.currentTarget)}",
+                        "Now: ${formatter.targetInline(habit.type, habit.currentTarget)}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )

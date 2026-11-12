@@ -15,9 +15,12 @@ A private, offline, single-user Android app for building up to four habits, with
 - **Daily YES / NO.** Every day defaults to NO, and days you miss are filled in as NO. You can edit today and yesterday.
 - **Reward rule.** The day's guilt-free reward unlocks when all **mandatory** habits are YES and at least 3 habits are YES. With fewer than 3 habits, all of them must be YES. When the reward is locked, the app shows exactly what's still missing.
 - **14-day cycles.** At the end of each cycle, a habit with 10 or more YES gets a level-up prompt, which you must confirm. A habit with fewer than 5 YES steps down automatically, but never below its starting target. Both thresholds can be changed in Settings, and every target change is kept in a history.
-- **Graduation.** A habit graduates at 26 YES in the last 30 days, and only then can it be replaced. The old habit is archived with its history. A habit's name, target and step can be edited freely for 7 days after it is created; after that they are locked until it graduates.
+- **Graduation.** A habit graduates at 26 YES in the last 30 days, and only then can it be replaced. The old habit is archived with its history.
+- **Locked in after one day.** On the day you add a habit and the day after, you can edit anything about it, or delete it completely. After that it's locked in:
+  - its name, target and step can be edited again only once it graduates
+  - it can be deleted only when a cycle ends (on the cycle's last day or the next cycle's first day). Deleting it then archives it, so its history is kept and its slot becomes free.
 - **Home-screen widget** with one-tap YES for each habit and the reward status. It stays in sync with the app.
-- **Daily reminder** at a time you choose (default 9 PM). It lists the habits still at NO and has a button to mark each one YES. Reminders survive a reboot and use exact alarms when Android allows them.
+- **Daily reminder** at a time you choose (default 9 PM). It lists the habits still at NO and has a button to mark each one YES. Reminders survive a reboot and use exact alarms when Android allows them. The app asks for notification permission when onboarding ends, the Today screen warns if notifications are off, and **Settings → Send a test reminder** shows the reminder immediately.
 - **Overall goal.** One free-text goal, shown in the reminder and in a small popup the first time you open the app each day.
 - **Backups**:
   - an automatic daily Excel backup to a folder you pick (the newest 14 are kept)

@@ -31,13 +31,13 @@ class ReminderNotifier @Inject constructor(
      * Posts (or updates) the reminder for [date]. Cancels it when nothing is pending.
      * [silent] updates without sound, for example after a button was tapped.
      */
-    suspend fun show(date: LocalDate = time.today(), silent: Boolean = false) {
+    suspend fun show(date: LocalDate = time.today(), silent: Boolean = false, test: Boolean = false) {
         val current = settings.current()
         if (!current.onboardingComplete) return
         val day = tracker.dayView(date)
         val pending = day.entries.filter { !it.done }
         if (pending.isEmpty()) {
-            notifications.cancel(AppNotifications.ID_REMINDER)
+            if (test) showAllDone(current.overallGoal.trim()) else notifications.cancel(AppNotifications.ID_REMINDER)
             return
         }
         val names = pending.joinToString(", ") { it.habit.name }
@@ -82,6 +82,22 @@ class ReminderNotifier @Inject constructor(
                 .setCustomBigContentView(expanded)
         }
         notifications.post(AppNotifications.ID_REMINDER, builder.build())
+    }
+
+    /** Test reminder when everything is already YES, so the user can still see that it works. */
+    private fun showAllDone(goal: String) {
+        val text = "Test reminder: every habit is YES today." + if (goal.isNotEmpty()) " Goal: $goal" else ""
+        notifications.post(
+            AppNotifications.ID_REMINDER,
+            NotificationCompat.Builder(context, AppNotifications.CHANNEL_REMINDER)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("All habits done today")
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setContentIntent(notifications.openAppIntent(AppNotifications.ID_REMINDER))
+                .setAutoCancel(true)
+                .build(),
+        )
     }
 
     /** Re-renders the reminder after a change elsewhere (app or widget), if it is on screen. */

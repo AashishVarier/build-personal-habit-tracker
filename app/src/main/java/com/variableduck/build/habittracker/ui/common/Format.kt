@@ -22,10 +22,17 @@ class Formatter(private val is24Hour: Boolean) {
     fun clock(minuteOfDay: Int): String =
         LocalTime.of(minuteOfDay / 60, minuteOfDay % 60).format(if (is24Hour) clock24 else clock12)
 
+    /** Stand-alone label, e.g. "10 min", "By 7:30 AM", "Done or not done". */
     fun target(type: HabitType, value: Int?): String = when {
         value == null || type == HabitType.BOOLEAN -> "Done or not done"
         type == HabitType.DURATION -> "$value min"
-        else -> "by ${clock(value)}"
+        else -> "By ${clock(value)}"
+    }
+
+    /** For use inside a sentence, e.g. "Started at 10 min" or "Started at 7:30 AM". */
+    fun targetInline(type: HabitType, value: Int?): String = when {
+        value == null || type == HabitType.BOOLEAN -> "done or not done"
+        else -> targetValue(type, value)
     }
 
     fun targetValue(type: HabitType, value: Int): String =

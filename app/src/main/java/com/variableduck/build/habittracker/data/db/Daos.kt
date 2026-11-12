@@ -1,6 +1,7 @@
 package com.variableduck.build.habittracker.data.db
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -40,6 +41,13 @@ interface TrackerDao {
 
     @Update
     suspend fun updateHabit(habit: Habit)
+
+    /** Entries, target changes and review items of the habit are removed with it (cascade). */
+    @Delete
+    suspend fun deleteHabit(habit: Habit)
+
+    @Query("SELECT DISTINCT date FROM habit_logs WHERE habitId = :habitId")
+    suspend fun logDates(habitId: Long): List<LocalDate>
 
     @Query("SELECT MAX(date) FROM days")
     suspend fun lastDayDate(): LocalDate?

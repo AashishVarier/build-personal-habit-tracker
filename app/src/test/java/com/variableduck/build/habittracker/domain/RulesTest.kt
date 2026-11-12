@@ -64,12 +64,44 @@ class EditWindowTest {
     }
 
     @Test
-    fun `habit details are editable for 7 days, then locked until graduation`() {
-        val created = habit(createdOn = today.minusDays(6))
-        assertTrue(EditWindow.canEditHabitDetails(created, today, graduated = false))
-        val week = habit(createdOn = today.minusDays(7))
-        assertFalse(EditWindow.canEditHabitDetails(week, today, graduated = false))
-        assertTrue(EditWindow.canEditHabitDetails(week, today, graduated = true))
+    fun `a new habit is editable on the day it was added and the day after, then locked until graduation`() {
+        assertTrue(EditWindow.canEditHabitDetails(habit(createdOn = today), today, graduated = false))
+        val yesterday = habit(createdOn = today.minusDays(1))
+        assertTrue(EditWindow.canEditHabitDetails(yesterday, today, graduated = false))
+        assertEquals(today, EditWindow.lastFreeEditDay(yesterday))
+        val older = habit(createdOn = today.minusDays(2))
+        assertFalse(EditWindow.canEditHabitDetails(older, today, graduated = false))
+        assertTrue(EditWindow.canEditHabitDetails(older, today, graduated = true))
+    }
+}
+
+class HabitDeletionRuleTest {
+    private val anchor = LocalDate.of(2026, 3, 2)
+
+    @Test
+    fun `a habit in its first day can be deleted completely`() {
+        val fresh = habit(createdOn = anchor.plusDays(5))
+        assertEquals(HabitDeletion.DELETE_COMPLETELY, HabitDeletionRule.mode(fresh, anchor.plusDays(5), anchor))
+        assertEquals(HabitDeletion.DELETE_COMPLETELY, HabitDeletionRule.mode(fresh, anchor.plusDays(6), anchor))
+    }
+
+    @Test
+    fun `a locked habit can only be deleted when the cycle ends`() {
+        val locked = habit(createdOn = anchor)
+        assertEquals(HabitDeletion.NOT_ALLOWED, HabitDeletionRule.mode(locked, anchor.plusDays(5), anchor))
+        // Last day of cycle 1 and first day of cycle 2.
+        assertEquals(HabitDeletion.ARCHIVE, HabitDeletionRule.mode(locked, anchor.plusDays(13), anchor))
+        assertEquals(HabitDeletion.ARCHIVE, HabitDeletionRule.mode(locked, anchor.plusDays(14), anchor))
+        assertEquals(HabitDeletion.NOT_ALLOWED, HabitDeletionRule.mode(locked, anchor.plusDays(15), anchor))
+        assertEquals(anchor.plusDays(27), HabitDeletionRule.nextDeletionDay(anchor, anchor.plusDays(15)))
+        // Without a cycle start there is no cycle end, so it stays locked.
+        assertEquals(HabitDeletion.NOT_ALLOWED, HabitDeletionRule.mode(locked, anchor.plusDays(13), null))
+    }
+
+    @Test
+    fun `archived habits cannot be deleted again`() {
+        val archived = habit(createdOn = anchor, archivedOn = anchor.plusDays(3))
+        assertEquals(HabitDeletion.NOT_ALLOWED, HabitDeletionRule.mode(archived, anchor.plusDays(3), anchor))
     }
 }
 
