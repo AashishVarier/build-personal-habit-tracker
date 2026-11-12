@@ -159,18 +159,6 @@ The release APK built in CI is unsigned, because no signing secrets are stored i
 
   WorkManager adds `WAKE_LOCK`, `FOREGROUND_SERVICE` and `ACCESS_NETWORK_STATE`. The last one only lets the app ask whether a network is available; without `INTERNET`, the app can't send or receive anything.
 
-## Screenshots
-
-| Today | History | Stats |
-|---|---|---|
-| ![Today](docs/screenshots/today.png) | ![History](docs/screenshots/history.png) | ![Stats](docs/screenshots/stats.png) |
-
-| Habits | Settings | Widget |
-|---|---|---|
-| ![Habits](docs/screenshots/habits.png) | ![Settings](docs/screenshots/settings.png) | ![Widget](docs/screenshots/widget.png) |
-
-These are placeholder paths. Add screenshots under `docs/screenshots/`, and use only generic example habits in them.
-
 ## License
 
 [MIT](LICENSE)
