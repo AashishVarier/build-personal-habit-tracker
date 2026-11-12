@@ -1,0 +1,28 @@
+# Gradle and build output. Anchored on purpose: an unanchored "build/" would also
+# ignore the source package directory com/variableduck/build/.
+.gradle/
+/build/
+/app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+
+# Machine-specific configuration (contains local SDK paths)
+local.properties
+
+# IDE files
+.idea/
+*.iml
+.DS_Store
+
+# Build artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Release signing: never commit secrets
+keystore.properties
+*.jks
+*.keystore
