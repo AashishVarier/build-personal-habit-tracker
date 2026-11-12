@@ -1,6 +1,6 @@
 # Habit Tracker
 
-[![CI](https://github.com/variableduck/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/variableduck/habit-tracker/actions/workflows/ci.yml)
+[![CI](https://github.com/AashishVarier/build-personal-habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/AashishVarier/build-personal-habit-tracker/actions/workflows/ci.yml)
 
 A private, offline, single-user Android app for building up to four habits, with gradual targets and a guilt-free daily reward.
 
