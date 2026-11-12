@@ -29,6 +29,14 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # Install the exact SDK packages the build uses instead of relying on what the runner
+      # image happens to include.
+      - name: Set up Android SDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;36.0.0" > /dev/null
+
       # Also validates the Gradle wrapper checksum. The "basic" cache provider is the fully
       # open-source one, built on the standard GitHub Actions cache.
       - name: Set up Gradle
@@ -46,9 +54,39 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug assembleDebugAndroidTest
 
-      # Minified with R8. Unsigned: no signing secrets are stored in the repository or in CI.
+      # Secrets are not available to pull requests from forks, so those builds use the fallback.
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/habit-tracker-release.jks"
+            echo "HABIT_TRACKER_STORE_FILE=$RUNNER_TEMP/habit-tracker-release.jks" >> "$GITHUB_ENV"
+            echo "Signing with the release keystore from GitHub Secrets."
+          else
+            echo "SIGNING_ARGS=-PhabitTrackerDebugSignRelease=true" >> "$GITHUB_ENV"
+            echo "::warning title=Debug-signed APK::Signing secrets are not set, so this release APK is signed with a throwaway debug key. Each such build has a different key, so it can't be installed as an update over a previous build. See README > Release signing."
+          fi
+
+      # Minified with R8.
       - name: Build release APK
-        run: ./gradlew assembleRelease
+        env:
+          HABIT_TRACKER_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          HABIT_TRACKER_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          HABIT_TRACKER_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease $SIGNING_ARGS
+
+      - name: Name the APK
+        id: apk
+        run: |
+          VERSION=$(jq -r '.elements[0].versionName' app/build/outputs/apk/release/output-metadata.json)
+          NAME="HabitTracker-${VERSION}-${GITHUB_SHA::7}"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/${NAME}.apk"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload test and lint reports
         if: always()
@@ -69,10 +107,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload release APK (unsigned)
+      - name: Upload release APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: ${{ steps.apk.outputs.name }}
+          path: dist/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/habit-tracker-release.jks"

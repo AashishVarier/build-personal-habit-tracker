@@ -72,7 +72,22 @@ Signing secrets are never stored in the repository.
 2. Copy `keystore.properties.example` to `keystore.properties` and fill in the path, alias and passwords. Both `keystore.properties` and `*.jks` are git-ignored.
 3. Run `./gradlew assembleRelease`.
 
-You can use environment variables instead of the file (for example in CI): `HABIT_TRACKER_STORE_FILE`, `HABIT_TRACKER_STORE_PASSWORD`, `HABIT_TRACKER_KEY_ALIAS` and `HABIT_TRACKER_KEY_PASSWORD`.
+You can use environment variables instead of the file: `HABIT_TRACKER_STORE_FILE`, `HABIT_TRACKER_STORE_PASSWORD`, `HABIT_TRACKER_KEY_ALIAS` and `HABIT_TRACKER_KEY_PASSWORD`.
+
+For a quick installable test build without a release keystore, run `./gradlew assembleRelease -PhabitTrackerDebugSignRelease=true`. It signs the release APK with your debug key. Don't distribute APKs signed this way.
+
+### Signing in GitHub Actions
+
+To have CI produce release APKs signed with your own key, add these repository secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|---|---|
+| `KEYSTORE_BASE64` | The keystore file, base64-encoded: `base64 -w0 release-keystore.jks` (on macOS: `base64 -i release-keystore.jks`) |
+| `KEYSTORE_PASSWORD` | The keystore password |
+| `KEY_ALIAS` | The key alias, for example `habittracker` |
+| `KEY_PASSWORD` | The key password |
+
+The workflow decodes the keystore into the runner's temporary folder, signs the release APK and deletes the keystore at the end of the job. If any secret is missing, as it always is for pull requests from forks, the release APK is signed with a throwaway debug key instead and the run shows a warning. Such an APK installs fine, but each build has a different key, so it can't be installed as an update over a previous build.
 
 ## Backup and restore
 
@@ -139,14 +154,15 @@ The unit tests cover:
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main`, on every pull request, and on demand from the Actions tab. On an Ubuntu runner with JDK 21 it:
 
-1. validates the Gradle wrapper checksum
-2. runs the unit tests (`testDebugUnitTest`), including the Room and Compose UI tests under Robolectric
-3. runs Android lint (`lintDebug`)
-4. builds the debug APK and the instrumented-test APK
-5. builds the release APK in a separate step, minified with R8. Both build steps fail if the INTERNET permission ever appears in the manifest.
-6. uploads the test and lint reports, the debug APK and the release APK as build artifacts (kept for 14 days)
+1. installs the exact Android SDK packages the build needs (platform 37, build-tools 36)
+2. validates the Gradle wrapper checksum
+3. runs the unit tests (`testDebugUnitTest`), including the Room and Compose UI tests under Robolectric
+4. runs Android lint (`lintDebug`)
+5. builds the debug APK and the instrumented-test APK
+6. builds the release APK, minified with R8. It's signed with your key if the [signing secrets](#signing-in-github-actions) are set, and with a throwaway debug key otherwise. Both build steps fail if the INTERNET permission ever appears in the manifest.
+7. uploads the test and lint reports, the debug APK and the release APK as build artifacts (kept for 14 days). The release APK is named `HabitTracker-<version>-<commit>.apk`, for example `HabitTracker-1.0.0-a4bb7d4.apk`.
 
-The release APK built in CI is unsigned (`app-release-unsigned`), because no signing secrets are stored in the repository or in CI. To install a release build, sign it locally as described in [Release signing](#release-signing). The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
+The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
 
 ## Privacy
 

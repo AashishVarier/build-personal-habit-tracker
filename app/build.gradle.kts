@@ -24,6 +24,10 @@ fun signingValue(propertyKey: String, envKey: String): String? =
 
 val releaseStoreFile: String? = signingValue("storeFile", "HABIT_TRACKER_STORE_FILE")
 
+// Opt-in (used by CI when no release keystore is available): sign the release build with the
+// debug key so the APK can still be installed for testing. Never use it for real releases.
+val debugSignRelease: Boolean = providers.gradleProperty("habitTrackerDebugSignRelease").orNull == "true"
+
 android {
     namespace = "com.variableduck.build.habittracker"
     compileSdk = 37
@@ -56,8 +60,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            if (releaseStoreFile != null) {
-                signingConfig = signingConfigs.getByName("release")
+            when {
+                releaseStoreFile != null -> signingConfig = signingConfigs.getByName("release")
+                debugSignRelease -> signingConfig = signingConfigs.getByName("debug")
             }
         }
     }
