@@ -1,5 +1,7 @@
 # Habit Tracker
 
+[![CI](https://github.com/variableduck/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/variableduck/habit-tracker/actions/workflows/ci.yml)
+
 A private, offline, single-user Android app for building up to four habits, with gradual targets and a guilt-free daily reward.
 
 ## Features
@@ -104,6 +106,7 @@ app/src/main/java/com/variableduck/build/habittracker/
 └── ui/           Compose screens: onboarding, today, history, stats, habits, settings, review, importmode
 app/schemas/      Exported Room schema JSON (one file per database version)
 docs/SPEC.md      The original specification
+.github/workflows/ci.yml   GitHub Actions: tests, lint and APK builds
 ```
 
 ## Tests
@@ -131,6 +134,18 @@ The unit tests cover:
 - the retention purge, including refusing to delete when the archive export fails
 - an xlsx export → restore round trip, in pure JVM and against a database
 - a UI test that logs habits from the Today screen
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main`, on every pull request, and on demand from the Actions tab. On an Ubuntu runner with JDK 21 it:
+
+1. validates the Gradle wrapper checksum
+2. runs the unit tests (`testDebugUnitTest`), including the Room and Compose UI tests under Robolectric
+3. runs Android lint (`lintDebug`)
+4. builds the debug and release APKs and the instrumented-test APK. These builds also fail if the INTERNET permission ever appears in the manifest.
+5. uploads the test and lint reports, and the debug APK, as build artifacts (kept for 14 days)
+
+The release APK built in CI is unsigned, because no signing secrets are stored in the repository or in CI. The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
 
 ## Privacy
 
