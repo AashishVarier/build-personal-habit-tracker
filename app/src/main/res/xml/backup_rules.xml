@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto Backup (Android 11 and lower): the Room database and the settings. -->
+<full-backup-content>
+    <include domain="database" path="habit_tracker.db" />
+    <include domain="database" path="habit_tracker.db-wal" />
+    <include domain="database" path="habit_tracker.db-shm" />
+    <include domain="file" path="datastore/settings.preferences_pb" />
+</full-backup-content>

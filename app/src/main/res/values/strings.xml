@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Habit Tracker</string>
+    <string name="widget_name">Habits today</string>
+    <string name="widget_description">Tap a habit to mark it YES. Shows today\'s reward status.</string>
+</resources>
