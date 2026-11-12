@@ -162,8 +162,7 @@ The release APK built in CI is unsigned (`app-release-unsigned`), because no sig
 
 ## Contributors
 
-- [@variableduck](https://github.com/variableduck)
-- [@arvariable](https://github.com/arvariable)
+- [@AashishVarier](https://github.com/AashishVarier)
 
 ## License
 
