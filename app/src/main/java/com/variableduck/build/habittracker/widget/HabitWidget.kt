@@ -152,6 +152,8 @@ class ToggleHabitAction : ActionCallback {
         val habitId = parameters[HabitIdKey] ?: return
         val deps = EntryPointAccessors.fromApplication(context.applicationContext, ReceiverEntryPoint::class.java)
         deps.tracker().toggle(deps.timeProvider().today(), habitId)
+        // Redraw this widget right away rather than waiting for the app-wide refresh.
+        HabitWidget().update(context, glanceId)
     }
 
     companion object {
