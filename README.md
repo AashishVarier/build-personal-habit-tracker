@@ -142,10 +142,11 @@ The unit tests cover:
 1. validates the Gradle wrapper checksum
 2. runs the unit tests (`testDebugUnitTest`), including the Room and Compose UI tests under Robolectric
 3. runs Android lint (`lintDebug`)
-4. builds the debug and release APKs and the instrumented-test APK. These builds also fail if the INTERNET permission ever appears in the manifest.
-5. uploads the test and lint reports, and the debug APK, as build artifacts (kept for 14 days)
+4. builds the debug APK and the instrumented-test APK
+5. builds the release APK in a separate step, minified with R8. Both build steps fail if the INTERNET permission ever appears in the manifest.
+6. uploads the test and lint reports, the debug APK and the release APK as build artifacts (kept for 14 days)
 
-The release APK built in CI is unsigned, because no signing secrets are stored in the repository or in CI. The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
+The release APK built in CI is unsigned (`app-release-unsigned`), because no signing secrets are stored in the repository or in CI. To install a release build, sign it locally as described in [Release signing](#release-signing). The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
 
 ## Privacy
 

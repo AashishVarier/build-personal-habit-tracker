@@ -42,9 +42,13 @@ jobs:
       - name: Lint
         run: ./gradlew lintDebug
 
-      # Both assemble tasks also verify that the merged manifest has no INTERNET permission.
-      - name: Build debug and release APKs
-        run: ./gradlew assembleDebug assembleRelease assembleDebugAndroidTest
+      # Each assemble task also verifies that the merged manifest has no INTERNET permission.
+      - name: Build debug APK
+        run: ./gradlew assembleDebug assembleDebugAndroidTest
+
+      # Minified with R8. Unsigned: no signing secrets are stored in the repository or in CI.
+      - name: Build release APK
+        run: ./gradlew assembleRelease
 
       - name: Upload test and lint reports
         if: always()
@@ -62,5 +66,13 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release APK (unsigned)
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-release-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
