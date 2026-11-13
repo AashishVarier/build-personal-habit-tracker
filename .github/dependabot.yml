@@ -1,0 +1,12 @@
+# Keeps the commit-SHA pins of the GitHub Actions in .github/workflows up to date.
+# Dependabot pull requests get no repository secrets, so they never see the signing key.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

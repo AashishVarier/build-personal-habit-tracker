@@ -31,6 +31,17 @@ A private, offline, single-user Android app for building up to four habits, with
 - **6-month retention.** Once a week the app offers to delete entries older than the limit. It never deletes without your confirmation, and it archives the data to Excel first.
 - **No streak counters.** Stats show 14-day completion, the timeline of target changes, and progress toward graduation.
 
+## Build an APK on GitHub
+
+You don't need Android Studio or a JDK to get the app. GitHub can build it for you:
+
+1. Fork this repository.
+2. In your fork, open the **Actions** tab. GitHub turns workflows off in new forks, so enable them if it asks.
+3. Select **Build APK**, then **Run workflow**, and confirm with **Run workflow**. Wait for the run to finish.
+4. Open **Releases** on your fork's main page. The newest release has the APK attached. Open that page on your phone, tap the APK and install it (see [Install](#install)).
+
+Until you set up signing, every build is a **test build** signed with a throwaway key. It installs on a phone that doesn't have the app yet, but it can't be installed over an earlier build, and uninstalling the app deletes its data. Add the four [signing secrets](#signing-in-github-actions) once, and every later build installs as an update and keeps your data. Each release says which kind it is.
+
 ## Requirements
 
 | | |
@@ -81,7 +92,7 @@ For a quick installable test build without a release keystore, run `./gradlew as
 
 ### Signing in GitHub Actions
 
-To have CI produce release APKs signed with your own key, add these repository secrets under **Settings → Secrets and variables → Actions**:
+To have **Build APK** and CI produce release APKs signed with your own key, add these repository secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Value |
 |---|---|
@@ -90,7 +101,9 @@ To have CI produce release APKs signed with your own key, add these repository s
 | `KEY_ALIAS` | The key alias, for example `habittracker` |
 | `KEY_PASSWORD` | The key password |
 
-The workflow decodes the keystore into the runner's temporary folder, signs the release APK and deletes the keystore at the end of the job. If any secret is missing, as it always is for pull requests from forks, the release APK is signed with a throwaway debug key instead and the run shows a warning. Such an APK installs fine, but each build has a different key, so it can't be installed as an update over a previous build.
+Both workflows decode the keystore into the runner's temporary folder, sign the release APK and delete the keystore at the end of the job. If any secret is missing, as it always is for pull requests from forks, the release APK is signed with a throwaway debug key instead and the run shows a warning. Such an APK installs fine, but each build has a different key, so it can't be installed as an update over a previous build.
+
+This setup assumes you're the only person who can push to the repository. Pull requests from forks never see the secrets, but anyone with write access could read them through a pull request from a branch. Before you add collaborators, move the secrets into a [GitHub Environment](https://docs.github.com/actions/deployment/targeting-different-environments/using-environments-for-deployment) that only the `main` branch can use.
 
 ## Backup and restore
 
@@ -102,10 +115,10 @@ The workflow decodes the keystore into the runner's temporary folder, signs the 
   - `Settings`
 
   **Export entries to CSV** writes the Entries table as CSV. The xlsx file is written directly as OOXML, with no Apache POI.
-- **Restore.** **Settings → Restore from an Excel backup** (also offered during onboarding) reads a backup and shows a preview: the date range, the number of days, the habits and the target changes. Nothing changes until you confirm. Restoring replaces all current data, and if a backup folder is set, the current data is first saved there as `habit-tracker_pre-restore_<timestamp>.xlsx`. Files edited and re-saved in Excel or LibreOffice can still be restored.
+- **Restore.** **Settings → Restore from an Excel backup** (also offered during onboarding) reads a backup and shows a preview: the date range, the number of days, the habits and the target changes. Nothing changes until you confirm. Restoring replaces all current data, and if a backup folder is set, the current data is first saved there as `habit-tracker_pre-restore_<timestamp>.xlsx`. Files edited and re-saved in Excel or LibreOffice can still be restored. Every value is checked against the same limits as the app (name length, target range, dates no later than tomorrow), and a file that breaks them is rejected with the sheet, row and column, before anything changes.
 - **Retention archives.** Entries older than the retention limit (default 6 months) are never deleted silently. Once a week the app asks: "N days older than *date* can be deleted. Delete?" If you choose **Delete**, the data is first exported to `archive_<from>_<to>.xlsx` in the backup folder. If that export fails, nothing is deleted. Old target changes and archived habits with no remaining entries are removed too. Active habits and settings never are. The last 30 days and any cycle still waiting for review are always kept.
 - **History import.** **Settings → History import mode** lets you enter YES/NO, actual times and remarks for any past date. It bypasses the today-and-yesterday edit window and is clearly labelled.
-- **Android Auto Backup** is enabled for the database and the settings file.
+- **Android Auto Backup** is enabled for the database and the settings file, but only when Android can encrypt the backup end to end (Android 9 or newer with a screen lock), or for a direct transfer to a new phone. `adb backup` can't extract the data on Android 9 or newer.
 
 ## Project structure
 
@@ -124,7 +137,8 @@ app/src/main/java/com/variableduck/build/habittracker/
 └── ui/           Compose screens: onboarding, today, history, stats, habits, settings, review, importmode
 app/schemas/      Exported Room schema JSON (one file per database version)
 docs/SPEC.md      The original specification
-.github/workflows/ci.yml   GitHub Actions: tests, lint and APK builds
+.github/workflows/ci.yml          GitHub Actions: tests, lint and APK builds
+.github/workflows/build-apk.yml   GitHub Actions: one-click APK, published as a GitHub Release
 ```
 
 ## Tests
@@ -165,7 +179,9 @@ The unit tests cover:
 6. builds the release APK, minified with R8. It's signed with your key if the [signing secrets](#signing-in-github-actions) are set, and with a throwaway debug key otherwise. Both build steps fail if the INTERNET permission ever appears in the manifest.
 7. uploads the test and lint reports, the debug APK and the release APK as build artifacts (kept for 14 days). The release APK is named `HabitTracker-<version>-<commit>.apk`, for example `HabitTracker-1.0.0-a4bb7d4.apk`.
 
-The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
+For pull requests, the APK artifacts get a `-pr<number>-untrusted` suffix, so they can't be mistaken for builds of `main`. The workflow only has read access to the repository, and Gradle caching uses the open-source `basic` provider of `gradle/actions/setup-gradle`. Both workflows pin every action to a commit SHA, and Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) opens a monthly pull request to update them. The instrumented test (`connectedDebugAndroidTest`) isn't run in CI, because it needs an emulator or a device.
+
+[`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml) runs only when someone with write access starts it from the Actions tab (see [Build an APK on GitHub](#build-an-apk-on-github)). It builds the release APK the same way as CI, but skips the tests and lint, which CI already runs on every push. It then publishes the APK as a GitHub Release tagged `build-<run number>`. It's the only workflow with write access to the repository, which it needs to create the release.
 
 ## Privacy
 
