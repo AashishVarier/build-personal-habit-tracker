@@ -142,9 +142,11 @@ fun TimePickerDialog(
     onConfirm: (Int) -> Unit,
     onClear: (() -> Unit)? = null,
 ) {
+    // The picker rejects hours outside 0..23, so clamp a damaged value instead of crashing.
+    val initial = initialMinuteOfDay.coerceIn(0, 24 * 60 - 1)
     val state = rememberTimePickerState(
-        initialHour = initialMinuteOfDay / 60,
-        initialMinute = initialMinuteOfDay % 60,
+        initialHour = initial / 60,
+        initialMinute = initial % 60,
         is24Hour = DateFormat.is24HourFormat(LocalContext.current),
     )
     AlertDialog(

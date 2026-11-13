@@ -10,6 +10,7 @@ import androidx.work.WorkerParameters
 import com.variableduck.build.habittracker.backup.BackupManager
 import com.variableduck.build.habittracker.backup.BackupResult
 import com.variableduck.build.habittracker.backup.RetentionManager
+import com.variableduck.build.habittracker.core.MaintenanceLock
 import com.variableduck.build.habittracker.core.TimeProvider
 import com.variableduck.build.habittracker.data.repo.CycleRepository
 import com.variableduck.build.habittracker.data.repo.DataChangeNotifier
@@ -22,8 +23,6 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Daily upkeep shared by app start, the midnight alarm and the WorkManager worker:
@@ -40,12 +39,11 @@ class Housekeeping @Inject constructor(
     private val notifications: AppNotifications,
     private val changeNotifier: DataChangeNotifier,
     private val time: TimeProvider,
+    private val lock: MaintenanceLock,
 ) {
-    private val mutex = Mutex()
-
     /** Light work for the day change: new rows, cycle evaluation, widget refresh. */
     suspend fun rollOver() {
-        mutex.withLock {
+        lock.withLock {
             if (!settings.current().onboardingComplete) return
             val today = time.today()
             tracker.fillMissingDays(today)
@@ -57,7 +55,7 @@ class Housekeeping @Inject constructor(
 
     /** Full daily run. [fromBackground] posts notifications instead of relying on in-app prompts. */
     suspend fun runDaily(fromBackground: Boolean) {
-        mutex.withLock {
+        lock.withLock {
             if (!settings.current().onboardingComplete) return
             val today = time.today()
             tracker.fillMissingDays(today)

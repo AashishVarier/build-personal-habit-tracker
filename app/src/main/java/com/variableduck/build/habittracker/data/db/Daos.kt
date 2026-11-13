@@ -198,10 +198,15 @@ interface BackupDao {
     @Query("DELETE FROM target_changes WHERE date < :cutoff")
     suspend fun deleteTargetChangesBefore(cutoff: LocalDate): Int
 
-    /** Archived habits with no remaining entries. Active habits are never touched. */
+    /**
+     * Archived habits with no remaining entries or target changes. Active habits are never
+     * touched. Target changes are checked too: deleting the habit would cascade to them, and the
+     * ones still left are newer than the purge cutoff, so they were never archived.
+     */
     @Query(
         "DELETE FROM habits WHERE archivedOn IS NOT NULL " +
-            "AND id NOT IN (SELECT DISTINCT habitId FROM habit_logs)",
+            "AND id NOT IN (SELECT DISTINCT habitId FROM habit_logs) " +
+            "AND id NOT IN (SELECT DISTINCT habitId FROM target_changes)",
     )
     suspend fun deleteArchivedHabitsWithoutEntries(): Int
 

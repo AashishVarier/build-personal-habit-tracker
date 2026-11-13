@@ -1,12 +1,14 @@
 package com.variableduck.build.habittracker.data.settings
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.preferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.variableduck.build.habittracker.domain.RetentionPolicy
 import com.variableduck.build.habittracker.domain.Thresholds
@@ -160,7 +162,15 @@ class SettingsRepository @Inject constructor(
         if (value == null) remove(key) else this[key] = value
     }
 
-    private companion object {
-        const val MINUTES_PER_DAY = 24 * 60
+    companion object {
+        private const val MINUTES_PER_DAY = 24 * 60
+
+        /**
+         * Replaces a corrupt settings file instead of failing every read and write. The file only
+         * exists once onboarding has finished, so onboarding stays done (the habits are still in
+         * the database); every other setting returns to its default.
+         */
+        val corruptionHandler: ReplaceFileCorruptionHandler<Preferences> =
+            ReplaceFileCorruptionHandler { preferencesOf(Keys.ONBOARDING_COMPLETE to true) }
     }
 }

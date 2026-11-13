@@ -10,6 +10,7 @@ import com.variableduck.build.habittracker.core.TimeProvider
 import com.variableduck.build.habittracker.data.db.AppDatabase
 import com.variableduck.build.habittracker.data.repo.DataChangeNotifier
 import com.variableduck.build.habittracker.data.repo.TrackerRepository
+import com.variableduck.build.habittracker.data.settings.SettingsRepository
 import com.variableduck.build.habittracker.reminders.AlarmScheduler
 import com.variableduck.build.habittracker.reminders.AppNotifications
 import com.variableduck.build.habittracker.reminders.Housekeeping
@@ -44,7 +45,10 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSettingsDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
-        PreferenceDataStoreFactory.create(produceFile = { context.preferencesDataStoreFile("settings") })
+        PreferenceDataStoreFactory.create(
+            corruptionHandler = SettingsRepository.corruptionHandler,
+            produceFile = { context.preferencesDataStoreFile("settings") },
+        )
 
     @Provides
     @Singleton

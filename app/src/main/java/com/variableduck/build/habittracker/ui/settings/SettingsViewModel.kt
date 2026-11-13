@@ -153,8 +153,17 @@ class SettingsViewModel @Inject constructor(
 
     fun suggestedExportName(extension: String) = "habit-tracker_export_${time.today()}.$extension"
 
+    /** Runs [block]; a failure (storage full, folder access refused…) becomes a message, not a crash. */
     private fun perform(block: suspend () -> Unit) {
-        viewModelScope.launch { block() }
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.value = e.message ?: "Something went wrong."
+            }
+        }
     }
 
     private fun busy(block: suspend () -> Unit) {

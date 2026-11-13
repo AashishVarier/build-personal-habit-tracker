@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android Auto Backup (Android 12 and higher): the Room database and the settings. -->
+<!-- Android Auto Backup (Android 12 and higher): the Room database and the settings.
+     Cloud backups only when the device can encrypt them end to end (that needs a screen lock). -->
 <data-extraction-rules>
-    <cloud-backup>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
         <include domain="database" path="habit_tracker.db" />
         <include domain="database" path="habit_tracker.db-wal" />
         <include domain="database" path="habit_tracker.db-shm" />

@@ -108,13 +108,19 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             // Habits are tracked from today. If the cycle started earlier, that first partial
             // cycle is not used to change their targets.
-            when (val result = tracker.createInitialHabits(s.habits.map { it.form.toDraft() }, today)) {
-                is HabitResult.Error -> _state.update { it.copy(saving = false, error = result.message) }
-                is HabitResult.Ok -> {
-                    settings.completeOnboarding(s.cycleStart, s.reminderMinute, s.goal, s.backupUri)
-                    alarms.scheduleAll()
-                    onDone()
+            try {
+                when (val result = tracker.createInitialHabits(s.habits.map { it.form.toDraft() }, today)) {
+                    is HabitResult.Error -> _state.update { it.copy(saving = false, error = result.message) }
+                    is HabitResult.Ok -> {
+                        settings.completeOnboarding(s.cycleStart, s.reminderMinute, s.goal, s.backupUri)
+                        alarms.scheduleAll()
+                        onDone()
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(saving = false, error = "Could not finish setup: ${e.message}") }
             }
         }
     }

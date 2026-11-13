@@ -24,6 +24,9 @@ import org.junit.Test
 class XlsxRoundTripTest {
     private val d0 = LocalDate.of(2026, 2, 1)
 
+    /** The day the backup is restored. */
+    private val today = d0.plusDays(30)
+
     private val snapshot = BackupSnapshot(
         habits = listOf(
             habit(id = 1, name = "Walk", type = HabitType.DURATION, current = 15, starting = 10, step = 5, slot = 0, createdOn = d0),
@@ -66,7 +69,7 @@ class XlsxRoundTripTest {
 
     private fun roundTrip(input: BackupSnapshot): BackupSnapshot {
         val bytes = ByteArrayOutputStream().also { XlsxWriter.write(BackupCodec.toSheets(input), it) }.toByteArray()
-        return BackupCodec.fromSheets(XlsxReader.read(ByteArrayInputStream(bytes)))
+        return BackupCodec.fromSheets(XlsxReader.read(ByteArrayInputStream(bytes)), today)
     }
 
     @Test
@@ -103,7 +106,7 @@ class XlsxRoundTripTest {
         val noEntries = BackupCodec.toSheets(snapshot).filter { it.name != "Entries" }
         val bytes = ByteArrayOutputStream().also { XlsxWriter.write(noEntries, it) }.toByteArray()
         val error = assertThrows(BackupFormatException::class.java) {
-            BackupCodec.fromSheets(XlsxReader.read(ByteArrayInputStream(bytes)))
+            BackupCodec.fromSheets(XlsxReader.read(ByteArrayInputStream(bytes)), today)
         }
         assertTrue(error.message!!.contains("Entries"))
     }

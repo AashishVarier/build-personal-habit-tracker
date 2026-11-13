@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.variableduck.build.habittracker.backup.xlsx.XlsxReader
 import com.variableduck.build.habittracker.backup.xlsx.XlsxWriter
+import com.variableduck.build.habittracker.core.MaintenanceLock
 import com.variableduck.build.habittracker.core.TimeProvider
 import com.variableduck.build.habittracker.data.repo.CycleRepository
 import com.variableduck.build.habittracker.data.repo.DataChangeNotifier
@@ -50,6 +51,7 @@ class BackupManager @Inject constructor(
     private val cycles: CycleRepository,
     private val time: TimeProvider,
     private val changeNotifier: DataChangeNotifier,
+    private val lock: MaintenanceLock,
 ) {
     suspend fun snapshot(): BackupSnapshot = store.snapshot(settings.portable(), time.today())
 
@@ -102,7 +104,7 @@ class BackupManager @Inject constructor(
     suspend fun preview(uri: Uri): RestorePreview = withContext(Dispatchers.IO) {
         val sheets = context.contentResolver.openInputStream(uri)?.use(XlsxReader::read)
             ?: throw IOException("Could not open the file.")
-        val snapshot = BackupCodec.fromSheets(sheets)
+        val snapshot = BackupCodec.fromSheets(sheets, time.today())
         RestorePreview(
             snapshot = snapshot,
             dayCount = snapshot.days.size,
@@ -117,9 +119,11 @@ class BackupManager @Inject constructor(
 
     /**
      * Replaces all data with the previewed backup. If a backup folder is set, the current data is
-     * saved there first; if that safety copy fails, nothing is restored.
+     * saved there first; if that safety copy fails, nothing is restored. Holds the
+     * [MaintenanceLock], so the daily housekeeping can't run between replacing the data and
+     * applying the backup's settings.
      */
-    suspend fun restore(preview: RestorePreview): String? {
+    suspend fun restore(preview: RestorePreview): String? = lock.withLock {
         val today = time.today()
         var safetyCopy: String? = null
         if (folder.folder() != null) {
@@ -138,7 +142,7 @@ class BackupManager @Inject constructor(
         tracker.fillMissingDays(today)
         cycles.evaluateEndedCycles(today)
         changeNotifier.notifyChanged()
-        return safetyCopy
+        safetyCopy
     }
 
     companion object {

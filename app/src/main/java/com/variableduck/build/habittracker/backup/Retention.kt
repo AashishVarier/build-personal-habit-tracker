@@ -1,5 +1,6 @@
 package com.variableduck.build.habittracker.backup
 
+import com.variableduck.build.habittracker.core.MaintenanceLock
 import com.variableduck.build.habittracker.core.TimeProvider
 import com.variableduck.build.habittracker.data.repo.CycleRepository
 import com.variableduck.build.habittracker.data.repo.DataChangeNotifier
@@ -58,6 +59,7 @@ class RetentionManager @Inject constructor(
     private val cycles: CycleRepository,
     private val time: TimeProvider,
     private val changeNotifier: DataChangeNotifier,
+    private val lock: MaintenanceLock,
 ) {
     /** Entries before this date may be deleted (clamped to keep the 30-day and cycle windows). */
     suspend fun cutoff(today: LocalDate = time.today()): LocalDate {
@@ -86,12 +88,12 @@ class RetentionManager @Inject constructor(
 
     suspend fun postpone(today: LocalDate = time.today()) = settings.markRetentionChecked(today)
 
-    /** Only ever called after the user tapped Delete. */
-    suspend fun purge(today: LocalDate = time.today()): PurgeResult {
+    /** Only ever called after the user tapped Delete. Never runs at the same time as a restore or housekeeping. */
+    suspend fun purge(today: LocalDate = time.today()): PurgeResult = lock.withLock {
         val purger = RetentionPurger(store) { fileName, snapshot -> backups.writeArchive(fileName, snapshot) }
         val result = purger.purge(cutoff(today))
         if (result !is PurgeResult.ExportFailed) settings.markRetentionChecked(today)
         if (result is PurgeResult.Deleted) changeNotifier.notifyChanged()
-        return result
+        result
     }
 }

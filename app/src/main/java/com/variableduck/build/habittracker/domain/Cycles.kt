@@ -78,6 +78,13 @@ object Targets {
     const val MAX_DURATION_MINUTES = 24 * 60
     const val MINUTES_PER_DAY = 24 * 60
 
+    /** True if [value] is a target the app can store and show: 1..1440 minutes, or a time of day. */
+    fun isValid(type: HabitType, value: Int): Boolean = when (type) {
+        HabitType.DURATION -> value in 1..MAX_DURATION_MINUTES
+        HabitType.DEADLINE -> value in 0 until MINUTES_PER_DAY
+        HabitType.BOOLEAN -> true
+    }
+
     /** The next harder target, or null when there is none. */
     fun harder(habit: Habit): Int? {
         val current = habit.currentTarget ?: return null

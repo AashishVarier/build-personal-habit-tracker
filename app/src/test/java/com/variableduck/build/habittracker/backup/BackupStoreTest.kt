@@ -107,6 +107,21 @@ class BackupStoreTest {
     }
 
     @Test
+    fun `purge keeps an archived habit that still has target changes newer than the cutoff`() = runTest {
+        val cutoff = today.minusMonths(6)
+        val habitB = db.trackerDao().allHabits().first { it.name == "Habit B" }
+        // All of Habit B's entries are older than the cutoff, but this target change isn't, so it
+        // is not in the archive. Deleting the habit would cascade to it and lose it.
+        db.trackerDao().insertTargetChange(TargetChange(0, habitB.id, cutoff, 7 * 60, 6 * 60 + 45, TargetChangeReason.EDIT))
+
+        val counts = store.deleteBefore(cutoff)
+
+        assertEquals(0, counts.archivedHabits)
+        assertNotNull(db.trackerDao().allHabits().firstOrNull { it.name == "Habit B" })
+        assertEquals(1, db.backupDao().targetChanges().count { it.habitId == habitB.id })
+    }
+
+    @Test
     fun `purge with a failing archive export leaves the database untouched`() = runTest {
         val cutoff = today.minusMonths(6)
         val before = store.snapshot(null, null)
@@ -122,7 +137,7 @@ class BackupStoreTest {
         val original = store.snapshot(settings.portable(), today)
 
         val bytes = ByteArrayOutputStream().also { XlsxWriter.write(BackupCodec.toSheets(original), it) }.toByteArray()
-        val parsed = BackupCodec.fromSheets(XlsxReader.read(ByteArrayInputStream(bytes)))
+        val parsed = BackupCodec.fromSheets(XlsxReader.read(ByteArrayInputStream(bytes)), today)
 
         val target = TestDatabase.create()
         try {

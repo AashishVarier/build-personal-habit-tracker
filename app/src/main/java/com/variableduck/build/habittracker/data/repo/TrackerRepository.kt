@@ -209,17 +209,19 @@ class TrackerRepository @Inject constructor(
     suspend fun updateHabitDetails(habitId: Long, draft: HabitDraft): HabitResult {
         validate(draft)?.let { return HabitResult.Error(it) }
         val today = time.today()
-        val habit = dao.habit(habitId) ?: return HabitResult.Error("Habit not found.")
-        if (!habit.isActive()) return HabitResult.Error("Archived habits can't be edited.")
-        val inWindow = EditWindow.isInHabitEditWindow(habit, today)
-        val graduated = graduationProgress(habitId, today).graduated
-        if (!EditWindow.canEditHabitDetails(habit, today, graduated)) {
-            return HabitResult.Error("Locked until this habit graduates.")
-        }
-        if (!inWindow && draft.type != habit.type) {
-            return HabitResult.Error("The type can only be changed during the habit's first day.")
-        }
-        db.withTransaction {
+        // Read, check and write in one transaction, so a step-down applied in the background
+        // in between isn't overwritten with a stale copy of the habit.
+        val result = db.withTransaction {
+            val habit = dao.habit(habitId) ?: return@withTransaction HabitResult.Error("Habit not found.")
+            if (!habit.isActive()) return@withTransaction HabitResult.Error("Archived habits can't be edited.")
+            val inWindow = EditWindow.isInHabitEditWindow(habit, today)
+            val graduated = graduationProgress(habitId, today).graduated
+            if (!EditWindow.canEditHabitDetails(habit, today, graduated)) {
+                return@withTransaction HabitResult.Error("Locked until this habit graduates.")
+            }
+            if (!inWindow && draft.type != habit.type) {
+                return@withTransaction HabitResult.Error("The type can only be changed during the habit's first day.")
+            }
             val newTarget = draft.target
             val oldTarget = habit.currentTarget
             val startingTarget = when {
@@ -243,9 +245,10 @@ class TrackerRepository @Inject constructor(
             }
             recomputeReward(today)
             recomputeReward(today.minusDays(1))
+            HabitResult.Ok(habitId)
         }
-        changeNotifier.notifyChanged()
-        return HabitResult.Ok(habitId)
+        if (result is HabitResult.Ok) changeNotifier.notifyChanged()
+        return result
     }
 
     /** The mandatory flag can be changed at any time. It affects today's and yesterday's reward. */
@@ -267,24 +270,25 @@ class TrackerRepository @Inject constructor(
     suspend fun replaceHabit(oldHabitId: Long, draft: HabitDraft): HabitResult {
         validate(draft)?.let { return HabitResult.Error(it) }
         val today = time.today()
-        val old = dao.habit(oldHabitId) ?: return HabitResult.Error("Habit not found.")
-        if (!old.isActive()) return HabitResult.Error("This habit is already archived.")
-        val progress = graduationProgress(oldHabitId, today)
-        if (!progress.graduated) {
-            return HabitResult.Error(
-                "Only graduated habits can be replaced (${progress.label}, needs ${Graduation.REQUIRED_YES}).",
-            )
-        }
-        val newId = db.withTransaction {
+        // One transaction: the archived copy must be the current version of the habit.
+        val result = db.withTransaction {
+            val old = dao.habit(oldHabitId) ?: return@withTransaction HabitResult.Error("Habit not found.")
+            if (!old.isActive()) return@withTransaction HabitResult.Error("This habit is already archived.")
+            val progress = graduationProgress(oldHabitId, today)
+            if (!progress.graduated) {
+                return@withTransaction HabitResult.Error(
+                    "Only graduated habits can be replaced (${progress.label}, needs ${Graduation.REQUIRED_YES}).",
+                )
+            }
             dao.updateHabit(old.copy(archivedOn = today))
             dao.deleteLogsFrom(oldHabitId, today)
             val id = dao.insertHabit(draft.toHabit(slot = old.slot, createdOn = today))
             ensureDay(today, listOf(dao.habit(id)!!))
             recomputeReward(today)
-            id
+            HabitResult.Ok(id)
         }
-        changeNotifier.notifyChanged()
-        return HabitResult.Ok(newId)
+        if (result is HabitResult.Ok) changeNotifier.notifyChanged()
+        return result
     }
 
     /**
@@ -294,25 +298,29 @@ class TrackerRepository @Inject constructor(
      */
     suspend fun deleteHabit(habitId: Long, cycleAnchor: LocalDate?): HabitResult {
         val today = time.today()
-        val habit = dao.habit(habitId) ?: return HabitResult.Error("Habit not found.")
-        when (HabitDeletionRule.mode(habit, today, cycleAnchor)) {
-            HabitDeletion.NOT_ALLOWED -> return HabitResult.Error(
-                "This habit is locked. You can delete it when the current cycle ends.",
-            )
-            HabitDeletion.DELETE_COMPLETELY -> db.withTransaction {
-                val affectedDates = dao.logDates(habitId)
-                dao.deleteHabit(habit)
-                (affectedDates + listOf(today.minusDays(1), today)).distinct().forEach { recomputeReward(it) }
+        // One transaction: the rule is checked against, and the archive made from, the current habit.
+        val result = db.withTransaction {
+            val habit = dao.habit(habitId) ?: return@withTransaction HabitResult.Error("Habit not found.")
+            when (HabitDeletionRule.mode(habit, today, cycleAnchor)) {
+                HabitDeletion.NOT_ALLOWED -> return@withTransaction HabitResult.Error(
+                    "This habit is locked. You can delete it when the current cycle ends.",
+                )
+                HabitDeletion.DELETE_COMPLETELY -> {
+                    val affectedDates = dao.logDates(habitId)
+                    dao.deleteHabit(habit)
+                    (affectedDates + listOf(today.minusDays(1), today)).distinct().forEach { recomputeReward(it) }
+                }
+                HabitDeletion.ARCHIVE -> {
+                    dao.updateHabit(habit.copy(archivedOn = today))
+                    dao.deleteLogsFrom(habitId, today)
+                    db.cycleDao().supersedePendingPrompts(habitId)
+                    recomputeReward(today)
+                }
             }
-            HabitDeletion.ARCHIVE -> db.withTransaction {
-                dao.updateHabit(habit.copy(archivedOn = today))
-                dao.deleteLogsFrom(habitId, today)
-                db.cycleDao().supersedePendingPrompts(habitId)
-                recomputeReward(today)
-            }
+            HabitResult.Ok(habitId)
         }
-        changeNotifier.notifyChanged()
-        return HabitResult.Ok(habitId)
+        if (result is HabitResult.Ok) changeNotifier.notifyChanged()
+        return result
     }
 
     private suspend fun ensureDay(date: LocalDate, habits: List<Habit>) {

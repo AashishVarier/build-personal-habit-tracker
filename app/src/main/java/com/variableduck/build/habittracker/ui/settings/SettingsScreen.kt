@@ -200,7 +200,9 @@ fun SettingsScreen(
             },
         )
     }
-    if (pickCycleStart) {
+    // Wait for the real state: after process death the dialog is restored before the settings load,
+    // and the placeholder date (LocalDate.MIN) overflows the date picker.
+    if (pickCycleStart && !state.loading) {
         DatePickerDialogFor(
             initial = s.cycleStart ?: state.today,
             max = state.today.plusDays(CycleCalendar.LENGTH - 1L),

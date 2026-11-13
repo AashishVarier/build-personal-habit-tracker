@@ -49,20 +49,11 @@ class BackupFolder @Inject constructor(
         }
     }
 
-    /** Writes [fileName], replacing an existing file of the same name. */
+    /** Writes [fileName], replacing an existing file of the same name once the new one is complete. */
     suspend fun write(fileName: String, mimeType: String, writer: (OutputStream) -> Unit): String =
         withContext(Dispatchers.IO) {
             val dir = folder() ?: throw IOException("No backup folder is set, or access to it was lost.")
-            dir.findFile(fileName)?.delete()
-            val file = dir.createFile(mimeType, fileName) ?: throw IOException("Could not create $fileName.")
-            try {
-                context.contentResolver.openOutputStream(file.uri, "wt")?.use(writer)
-                    ?: throw IOException("Could not open $fileName for writing.")
-            } catch (e: Exception) {
-                file.delete()
-                throw e
-            }
-            file.name ?: fileName
+            writeReplacing(dir, fileName, mimeType, { uri -> context.contentResolver.openOutputStream(uri, "wt") }, writer)
         }
 
     /** Keeps the newest [keep] files whose names match [pattern] and deletes older ones. */
@@ -72,5 +63,49 @@ class BackupFolder @Inject constructor(
             .filter { it.isFile && it.name?.matches(pattern) == true }
             .sortedByDescending { it.name }
         matching.drop(keep).count { it.delete() }
+    }
+
+    companion object {
+        internal const val PARTIAL_SUFFIX = ".partial"
+        private const val PARTIAL_MIME = "application/octet-stream"
+
+        /**
+         * Writes the new file under a temporary name first, so an existing [fileName] is only
+         * removed once its replacement has been written completely. A failed write leaves the old
+         * file untouched. Returns the name the file was saved under.
+         */
+        internal fun writeReplacing(
+            dir: DocumentFile,
+            fileName: String,
+            mimeType: String,
+            open: (Uri) -> OutputStream?,
+            writer: (OutputStream) -> Unit,
+        ): String {
+            val partialName = fileName + PARTIAL_SUFFIX
+            dir.findFile(partialName)?.delete() // left over from an interrupted write
+            val partial = createAndWrite(dir, partialName, PARTIAL_MIME, open, writer)
+            dir.findFile(fileName)?.delete()
+            if (partial.renameTo(fileName)) return partial.name ?: fileName
+            // This storage provider can't rename files: write the final file directly instead.
+            partial.delete()
+            return createAndWrite(dir, fileName, mimeType, open, writer).name ?: fileName
+        }
+
+        private fun createAndWrite(
+            dir: DocumentFile,
+            name: String,
+            mimeType: String,
+            open: (Uri) -> OutputStream?,
+            writer: (OutputStream) -> Unit,
+        ): DocumentFile {
+            val file = dir.createFile(mimeType, name) ?: throw IOException("Could not create $name.")
+            try {
+                open(file.uri)?.use(writer) ?: throw IOException("Could not open $name for writing.")
+            } catch (e: Exception) {
+                file.delete()
+                throw e
+            }
+            return file
+        }
     }
 }

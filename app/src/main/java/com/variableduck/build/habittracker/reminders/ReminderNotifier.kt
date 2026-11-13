@@ -64,7 +64,13 @@ class ReminderNotifier @Inject constructor(
         if (actions.size <= MAX_STANDARD_ACTIONS) {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
             actions.forEach { (name, intent) ->
-                builder.addAction(NotificationCompat.Action.Builder(R.drawable.ic_check, "✓ $name", intent).build())
+                builder.addAction(
+                    NotificationCompat.Action.Builder(R.drawable.ic_check, "✓ $name", intent)
+                        // Android 12+: tapping it on the lock screen asks to unlock first, so nobody
+                        // holding a locked phone can mark habits done.
+                        .setAuthenticationRequired(true)
+                        .build(),
+                )
             }
         } else {
             val expanded = RemoteViews(context.packageName, R.layout.notification_reminder_expanded)

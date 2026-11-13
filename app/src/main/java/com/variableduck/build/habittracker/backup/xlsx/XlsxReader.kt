@@ -8,6 +8,8 @@ import java.util.zip.ZipInputStream
 import javax.xml.parsers.SAXParserFactory
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
+import org.xml.sax.SAXException
+import org.xml.sax.ext.DefaultHandler2
 import org.xml.sax.helpers.DefaultHandler
 
 class XlsxFormatException(message: String, cause: Throwable? = null) : IOException(message, cause)
@@ -19,28 +21,48 @@ class XlsxFormatException(message: String, cause: Throwable? = null) : IOExcepti
  */
 object XlsxReader {
     private const val REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-    private const val MAX_ENTRY_BYTES = 32L * 1024 * 1024
-    private const val MAX_TOTAL_BYTES = 128L * 1024 * 1024
+    private const val LEXICAL_HANDLER = "http://xml.org/sax/properties/lexical-handler"
+
+    // A 10-year backup is a few megabytes of XML and about 150,000 cells, far below these limits.
+    private const val MAX_ENTRY_BYTES = 16L * 1024 * 1024
+    private const val MAX_TOTAL_BYTES = 32L * 1024 * 1024
     private const val MAX_ENTRIES = 2_000
+
+    /** Excel's own limit: column XFD. */
+    private const val MAX_COLUMNS = 16_384
+
+    /** Rows, cells and shared strings the whole file may expand into in memory. */
+    private const val MAX_CELLS = 1_000_000
 
     fun read(input: InputStream): LinkedHashMap<String, List<List<String>>> {
         val files = unzip(input)
         val workbook = files["xl/workbook.xml"] ?: throw XlsxFormatException("Not an .xlsx file (no workbook).")
         val sheets = parseWorkbook(workbook)
         val rels = files["xl/_rels/workbook.xml.rels"]?.let(::parseRels).orEmpty()
-        val sharedStrings = rels.values.firstOrNull { it.type.endsWith("/sharedStrings") }
+        val budget = CellBudget(MAX_CELLS)
+        val sharedStringsPart = rels.values.firstOrNull { it.type.endsWith("/sharedStrings") }
             ?.let { files[resolve(it.target)] }
-            ?.let(::parseSharedStrings)
-            ?: files["xl/sharedStrings.xml"]?.let(::parseSharedStrings)
-            ?: emptyList()
+            ?: files["xl/sharedStrings.xml"]
+        val sharedStrings = sharedStringsPart?.let { parseSharedStrings(it, budget) }.orEmpty()
 
         val result = LinkedHashMap<String, List<List<String>>>()
         sheets.forEachIndexed { index, (name, relId) ->
             val path = rels[relId]?.target?.let(::resolve) ?: "xl/worksheets/sheet${index + 1}.xml"
             val bytes = files[path] ?: throw XlsxFormatException("Sheet '$name' is missing.")
-            result[name] = parseSheet(bytes, sharedStrings)
+            result[name] = parseSheet(bytes, sharedStrings, budget)
         }
         return result
+    }
+
+    /**
+     * Counts what the file expands into. A row element of a few bytes can stand for thousands of
+     * cells, so without a budget a small crafted file could exhaust memory.
+     */
+    private class CellBudget(private var remaining: Int) {
+        fun spend(amount: Int) {
+            remaining -= amount
+            if (remaining < 0) throw XlsxFormatException("The file has too many cells.")
+        }
     }
 
     private fun unzip(input: InputStream): Map<String, ByteArray> {
@@ -115,7 +137,7 @@ object XlsxReader {
         return rels
     }
 
-    private fun parseSharedStrings(bytes: ByteArray): List<String> {
+    private fun parseSharedStrings(bytes: ByteArray, budget: CellBudget): List<String> {
         val strings = ArrayList<String>()
         parse(bytes, object : DefaultHandler() {
             private var current: StringBuilder? = null
@@ -133,6 +155,7 @@ object XlsxReader {
             override fun endElement(uri: String, localName: String, qName: String) {
                 when (localName) {
                     "si" -> {
+                        budget.spend(1)
                         strings += current?.toString().orEmpty()
                         current = null
                     }
@@ -148,7 +171,7 @@ object XlsxReader {
         return strings
     }
 
-    private fun parseSheet(bytes: ByteArray, sharedStrings: List<String>): List<List<String>> {
+    private fun parseSheet(bytes: ByteArray, sharedStrings: List<String>, budget: CellBudget): List<List<String>> {
         val rows = ArrayList<List<String>>()
         parse(bytes, object : DefaultHandler() {
             private var row: MutableMap<Int, String>? = null
@@ -186,6 +209,7 @@ object XlsxReader {
                     "rPh" -> phoneticDepth--
                     "c" -> {
                         val column = cellRef?.let(::columnIndex) ?: nextColumn
+                        if (column >= MAX_COLUMNS) throw XlsxFormatException("A cell is beyond the last column (XFD).")
                         nextColumn = column + 1
                         val text = when (cellType) {
                             "s" -> value.toString().trim().toIntOrNull()?.let { sharedStrings.getOrNull(it) }.orEmpty()
@@ -199,6 +223,7 @@ object XlsxReader {
                     "row" -> {
                         val cells = row.orEmpty()
                         val width = (cells.keys.maxOrNull() ?: -1) + 1
+                        budget.spend(maxOf(width, 1))
                         rows += List(width) { cells[it].orEmpty() }
                         row = null
                     }
@@ -213,7 +238,7 @@ object XlsxReader {
         return rows
     }
 
-    /** "B12" -> 1 */
+    /** "B12" -> 1. Stops before a long reference could overflow (which used to cause an out-of-memory crash). */
     private fun columnIndex(ref: String): Int? {
         var index = 0
         var letters = 0
@@ -227,6 +252,7 @@ object XlsxReader {
             } else {
                 break
             }
+            if (index > MAX_COLUMNS) throw XlsxFormatException("A cell is beyond the last column (XFD).")
         }
         return if (letters == 0) null else index - 1
     }
@@ -245,6 +271,7 @@ object XlsxReader {
         try {
             val factory = SAXParserFactory.newInstance()
             factory.isNamespaceAware = true
+            trySetFeature(factory, "http://apache.org/xml/features/disallow-doctype-decl", true)
             trySetFeature(factory, "http://xml.org/sax/features/external-general-entities", false)
             trySetFeature(factory, "http://xml.org/sax/features/external-parameter-entities", false)
             trySetFeature(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
@@ -252,11 +279,25 @@ object XlsxReader {
             reader.contentHandler = handler
             // Never resolve external entities: an exported file must not reach outside itself.
             reader.setEntityResolver { _, _ -> InputSource(StringReader("")) }
+            // .xlsx parts never have a DOCTYPE. Rejecting it also stops entity-expansion files
+            // ("billion laughs") on Android's parser, which ignores the features above.
+            try {
+                reader.setProperty(LEXICAL_HANDLER, RejectDoctype)
+            } catch (unsupported: SAXException) {
+                // Not recognised by this parser; disallow-doctype-decl above covers the JVM one.
+            }
             reader.parse(InputSource(ByteArrayInputStream(bytes)))
         } catch (e: XlsxFormatException) {
             throw e
         } catch (e: Exception) {
             throw XlsxFormatException("The file is damaged or not an .xlsx file.", e)
+        }
+    }
+
+    /** Fails on any DOCTYPE, before its entity declarations can be read. */
+    private object RejectDoctype : DefaultHandler2() {
+        override fun startDTD(name: String?, publicId: String?, systemId: String?) {
+            throw SAXException("A DOCTYPE is not allowed in an .xlsx file.")
         }
     }
 

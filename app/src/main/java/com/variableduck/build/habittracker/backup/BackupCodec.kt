@@ -2,7 +2,10 @@ package com.variableduck.build.habittracker.backup
 
 import com.variableduck.build.habittracker.backup.xlsx.XlsxSheet
 import com.variableduck.build.habittracker.core.FileFormats
+import com.variableduck.build.habittracker.data.repo.TrackerRepository
 import com.variableduck.build.habittracker.data.settings.PortableSettings
+import com.variableduck.build.habittracker.domain.CycleCalendar
+import com.variableduck.build.habittracker.domain.Targets
 import com.variableduck.build.habittracker.model.DayRecord
 import com.variableduck.build.habittracker.model.Habit
 import com.variableduck.build.habittracker.model.HabitLog
@@ -161,11 +164,18 @@ object BackupCodec {
 
     // ---------------------------------------------------------------- reading
 
-    fun fromSheets(sheets: Map<String, List<List<String>>>): BackupSnapshot {
+    /**
+     * Reads a backup. Values are checked against the same limits the app itself enforces, so a
+     * hand-edited or damaged file is rejected with the row and column instead of storing data the
+     * app can't handle. Nothing may be dated more than a day after [today] (one day of slack for
+     * time zones).
+     */
+    fun fromSheets(sheets: Map<String, List<List<String>>>, today: LocalDate): BackupSnapshot {
         val byName = sheets.mapKeys { it.key.trim().lowercase() }
         fun sheet(name: String) = byName[name.lowercase()]
+        val latest = today.plusDays(1)
 
-        val settingsTable = sheet(SHEET_SETTINGS)?.let { Table(SHEET_SETTINGS, it) }
+        val settingsTable = sheet(SHEET_SETTINGS)?.let { Table(SHEET_SETTINGS, it, latest) }
         val settingValues = settingsTable?.rows?.associate { row ->
             settingsTable.text(row, "Key") to settingsTable.raw(row, "Value")
         }.orEmpty()
@@ -174,7 +184,7 @@ object BackupCodec {
             throw BackupFormatException("This backup was made by a newer version of the app.")
         }
 
-        val habitsTable = Table(SHEET_HABITS, sheet(SHEET_HABITS) ?: missing(SHEET_HABITS))
+        val habitsTable = Table(SHEET_HABITS, sheet(SHEET_HABITS) ?: missing(SHEET_HABITS), latest)
         val habits = habitsTable.rows.map { row -> parseHabit(habitsTable, row) }
         val habitIds = habits.map { it.id }
         if (habitIds.toSet().size != habitIds.size) throw BackupFormatException("Habits: duplicate IDs.")
@@ -185,7 +195,7 @@ object BackupCodec {
         }
         val knownIds = habitIds.toSet()
 
-        val entriesTable = Table(SHEET_ENTRIES, sheet(SHEET_ENTRIES) ?: missing(SHEET_ENTRIES))
+        val entriesTable = Table(SHEET_ENTRIES, sheet(SHEET_ENTRIES) ?: missing(SHEET_ENTRIES), latest)
         val days = LinkedHashMap<LocalDate, DayRecord>()
         val logs = LinkedHashMap<Pair<LocalDate, Long>, HabitLog>()
         for (row in entriesTable.rows) {
@@ -216,18 +226,21 @@ object BackupCodec {
         }
 
         val targetChanges = sheet(SHEET_TARGETS)?.let { rows ->
-            val table = Table(SHEET_TARGETS, rows)
+            val table = Table(SHEET_TARGETS, rows, latest)
             table.rows.mapNotNull { row ->
                 val habitId = table.long(row, "Habit ID") ?: return@mapNotNull null
                 if (habitId !in knownIds) {
                     throw BackupFormatException("TargetHistory row ${row.number}: unknown habit ID $habitId.")
                 }
+                // Minutes or a time of day: a habit's type may have changed since the change was recorded.
+                fun target(column: String): Int =
+                    table.int(row, column)?.takeIf { it in 0..Targets.MAX_DURATION_MINUTES } ?: table.fail(row, column)
                 TargetChange(
                     id = table.long(row, "ID") ?: 0,
                     habitId = habitId,
                     date = table.date(row, "Date") ?: table.fail(row, "Date"),
-                    oldTarget = table.int(row, "Old target") ?: table.fail(row, "Old target"),
-                    newTarget = table.int(row, "New target") ?: table.fail(row, "New target"),
+                    oldTarget = target("Old target"),
+                    newTarget = target("New target"),
                     reason = table.text(row, "Reason").let { reason ->
                         TargetChangeReason.entries.firstOrNull { it.name.equals(reason, ignoreCase = true) }
                             ?: table.fail(row, "Reason")
@@ -236,12 +249,18 @@ object BackupCodec {
             }
         }.orEmpty()
 
+        // Unreadable settings are ignored rather than rejected, and so are dates past their limit:
+        // a far-future "last evaluated" date would otherwise switch off cycle reviews for good.
+        fun settingDate(key: String, latestAllowed: LocalDate): LocalDate? =
+            settingValues[key]?.let(::parseDate)?.takeIf { !it.isAfter(latestAllowed) }
+
         val portable = if (settingValues.isEmpty()) {
             null
         } else {
             PortableSettings(
                 reminderMinuteOfDay = settingValues[SettingKeys.REMINDER_TIME]?.let(::parseTime) ?: DEFAULT_REMINDER,
-                cycleStart = settingValues[SettingKeys.CYCLE_START]?.let(::parseDate),
+                // The cycle start date picker allows up to 13 days ahead.
+                cycleStart = settingDate(SettingKeys.CYCLE_START, today.plusDays(CycleCalendar.LENGTH - 1L)),
                 levelUpThreshold = settingValues[SettingKeys.LEVEL_UP]?.let(::parseInt) ?: 10,
                 stepDownThreshold = settingValues[SettingKeys.STEP_DOWN]?.let(::parseInt) ?: 5,
                 overallGoal = settingValues[SettingKeys.OVERALL_GOAL].orEmpty(),
@@ -255,8 +274,8 @@ object BackupCodec {
             logs = logs.values.sortedWith(compareBy({ it.date }, { it.habitId })),
             targetChanges = targetChanges,
             settings = portable,
-            lastEvaluatedCycleEnd = settingValues[SettingKeys.LAST_EVALUATED_CYCLE_END]?.let(::parseDate),
-            exportedOn = settingValues[SettingKeys.EXPORTED_ON]?.let(::parseDate),
+            lastEvaluatedCycleEnd = settingDate(SettingKeys.LAST_EVALUATED_CYCLE_END, today),
+            exportedOn = settingDate(SettingKeys.EXPORTED_ON, latest),
         )
     }
 
@@ -264,15 +283,24 @@ object BackupCodec {
         val type = table.text(row, "Type").let { text ->
             HabitType.entries.firstOrNull { it.name.equals(text, ignoreCase = true) } ?: table.fail(row, "Type")
         }
-        val name = table.text(row, "Name").ifBlank { table.fail(row, "Name") }
+        val name = table.text(row, "Name")
+            .takeIf { it.isNotBlank() && it.length <= TrackerRepository.NAME_MAX_LENGTH }
+            ?: table.fail(row, "Name")
+        // The same limits as the habit form, so the screens can always display the target.
+        fun target(column: String): Int? =
+            if (type.hasTarget) table.int(row, column)?.takeIf { Targets.isValid(type, it) } ?: table.fail(row, column) else null
         return Habit(
             id = table.long(row, "ID") ?: table.fail(row, "ID"),
             slot = table.int(row, "Slot")?.takeIf { it in 0 until MAX_ACTIVE } ?: table.fail(row, "Slot"),
             name = name,
             type = type,
-            currentTarget = if (type.hasTarget) table.int(row, "Current target") ?: table.fail(row, "Current target") else null,
-            startingTarget = if (type.hasTarget) table.int(row, "Starting target") ?: table.fail(row, "Starting target") else null,
-            step = if (type.hasTarget) table.int(row, "Step") ?: table.fail(row, "Step") else null,
+            currentTarget = target("Current target"),
+            startingTarget = target("Starting target"),
+            step = if (type.hasTarget) {
+                table.int(row, "Step")?.takeIf { it in 1..TrackerRepository.MAX_STEP } ?: table.fail(row, "Step")
+            } else {
+                null
+            },
             mandatory = table.text(row, "Mandatory").isYes(),
             createdOn = table.date(row, "Created on") ?: table.fail(row, "Created on"),
             archivedOn = table.date(row, "Archived on"),
@@ -283,14 +311,19 @@ object BackupCodec {
 
     private fun String.isYes(): Boolean = trim().uppercase().let { it == YES || it == "TRUE" || it == "1" }
 
-    /** ISO dates, or Excel serial numbers if a spreadsheet app converted the text to a date. */
+    /**
+     * ISO dates, or Excel serial numbers if a spreadsheet app converted the text to a date. Only
+     * years 1900 to 9999 are accepted: they sort correctly as text in the database, and anything
+     * else (ISO also allows years such as -999999999) is a typo or a damaged file.
+     */
     internal fun parseDate(text: String): LocalDate? {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return null
-        runCatching { return LocalDate.parse(trimmed) }
-        val serial = trimmed.toDoubleOrNull() ?: return null
-        if (serial < 1 || serial > 2_958_465) return null
-        return EXCEL_EPOCH.plusDays(serial.toLong())
+        val date = runCatching { LocalDate.parse(trimmed) }.getOrNull()
+            ?: trimmed.toDoubleOrNull()
+                ?.takeIf { it >= 1 && it <= 2_958_465 }
+                ?.let { EXCEL_EPOCH.plusDays(it.toLong()) }
+        return date?.takeIf { it.year in MIN_YEAR..MAX_YEAR }
     }
 
     /** "07:30", or an Excel time fraction such as 0.3125. */
@@ -307,7 +340,7 @@ object BackupCodec {
 
     private fun csvField(value: String): String {
         // Neutralise formulas when the CSV is opened in a spreadsheet app.
-        val safe = if (value.isNotEmpty() && value[0] in "=+-@" && value.toDoubleOrNull() == null) "'$value" else value
+        val safe = if (value.isNotEmpty() && value[0] in "=+-@\t\r" && value.toDoubleOrNull() == null) "'$value" else value
         return if (safe.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
             "\"" + safe.replace("\"", "\"\"") + "\""
         } else {
@@ -315,8 +348,8 @@ object BackupCodec {
         }
     }
 
-    /** Header-addressed view over sheet rows. */
-    private class Table(private val sheetName: String, rows: List<List<String>>) {
+    /** Header-addressed view over sheet rows. Dates after [latest] are rejected. */
+    private class Table(private val sheetName: String, rows: List<List<String>>, private val latest: LocalDate) {
         class Row(val number: Int, val cells: List<String>)
 
         private val columns: Map<String, Int>
@@ -345,7 +378,7 @@ object BackupCodec {
         fun date(row: Row, column: String): LocalDate? {
             val value = text(row, column)
             if (value.isEmpty()) return null
-            return parseDate(value) ?: fail(row, column)
+            return parseDate(value)?.takeIf { !it.isAfter(latest) } ?: fail(row, column)
         }
 
         fun time(row: Row, column: String): Int? {
@@ -362,5 +395,7 @@ object BackupCodec {
     private const val REMARK_MAX = 50
     private const val MINUTES_PER_DAY = 24 * 60
     private const val DEFAULT_REMINDER = 21 * 60
+    private const val MIN_YEAR = 1900
+    private const val MAX_YEAR = 9999
     private val EXCEL_EPOCH: LocalDate = LocalDate.of(1899, 12, 30)
 }
