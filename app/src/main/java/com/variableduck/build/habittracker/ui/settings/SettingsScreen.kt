@@ -43,6 +43,7 @@ import com.variableduck.build.habittracker.ui.common.SectionTitle
 import com.variableduck.build.habittracker.ui.common.TimePickerDialog
 import com.variableduck.build.habittracker.ui.common.rememberFormatter
 import com.variableduck.build.habittracker.ui.common.rememberNotificationAccess
+import com.variableduck.build.habittracker.widget.WidgetPinner
 
 @Composable
 fun SettingsScreen(
@@ -120,6 +121,14 @@ fun SettingsScreen(
             }
         }
         SettingRow("Overall goal", s.overallGoal.ifBlank { "Not set" }) { editGoal = true }
+
+        SectionTitle("Widget")
+        SettingRow(
+            "Add widget to home screen",
+            "Use this if the widget is missing from your home screen's widget list.",
+        ) {
+            WidgetPinner.requestPin(context)?.let(onMessage)
+        }
 
         SectionTitle("Cycles")
         SettingRow(
